@@ -1,0 +1,6167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simple Task Manager</title>
+
+  <style>
+    /* Custom properties */
+    :root {
+      color-scheme: dark;
+
+      --page-bg: #0f1411;
+      --surface: #171d19;
+      --surface-raised: #1d2520;
+
+      --text: #f3f7f4;
+      --text-secondary: #c3cec7;
+
+      --border: #5f6d64;
+
+      --accent: #70d28e;
+      --accent-strong: #2f7045;
+      --accent-hover: #3b8252;
+
+      --focus: #f5d66f;
+
+      --disabled-bg: #303832;
+      --disabled-text: #9da7a1;
+
+      --max-width: 1200px;
+      --radius: 0.3rem;
+
+      --space-1: 0.25rem;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-5: 1.5rem;
+      --space-6: 2rem;
+    }
+
+    /* Base */
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-width: 0;
+      background: var(--page-bg);
+    }
+
+    body {
+      margin: 0;
+      min-width: 0;
+      background: var(--page-bg);
+      color: var(--text);
+      font-family:
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button,
+    input,
+    select,
+    textarea,
+    dialog {
+      color: inherit;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      min-height: 2.5rem;
+    }
+
+    button,
+    select {
+      cursor: pointer;
+    }
+
+    textarea {
+      resize: vertical;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    :focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    ::selection {
+      background: var(--accent);
+      color: #0a120d;
+    }
+
+    /* Typography */
+    h1,
+    h2,
+    h3,
+    p,
+    dl,
+    ol,
+    ul {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: var(--space-3);
+      font-size: clamp(1.35rem, 2vw, 1.65rem);
+      line-height: 1.25;
+    }
+
+    h2 {
+      margin-bottom: var(--space-4);
+      font-size: 1.3rem;
+      line-height: 1.3;
+    }
+
+    h3 {
+      margin-bottom: var(--space-2);
+      font-size: 1.05rem;
+      line-height: 1.35;
+    }
+
+    .app-title {
+      margin: 0;
+      font-size: clamp(1.35rem, 3vw, 1.8rem);
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .secondary-text,
+    .field-help,
+    .metadata {
+      color: var(--text-secondary);
+    }
+
+    .field-help,
+    .field-error,
+    .metadata {
+      font-size: 0.9rem;
+    }
+
+    .field-error {
+      margin: var(--space-1) 0 0;
+      color: var(--text);
+      font-weight: 650;
+    }
+
+    /* General layout */
+    .app-shell {
+      width: min(100%, var(--max-width));
+      margin: 0 auto;
+      padding: 0 var(--space-4) var(--space-6);
+    }
+
+    .skip-link {
+      position: absolute;
+      top: var(--space-2);
+      left: var(--space-2);
+      z-index: 100;
+      padding: var(--space-2) var(--space-3);
+      background: var(--text);
+      color: var(--page-bg);
+      border-radius: var(--radius);
+      transform: translateY(-160%);
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    .database-workspace {
+      display: grid;
+      gap: var(--space-6);
+    }
+
+    /* Application header */
+    .app-header {
+      padding: var(--space-5) 0 var(--space-4);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .app-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      flex-wrap: wrap;
+    }
+
+    /* Action toolbar */
+    .primary-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      padding: var(--space-4) 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Status and empty states */
+    .status-message {
+      margin: var(--space-4) 0;
+      padding: var(--space-3) var(--space-4);
+      border: 1px solid var(--border);
+      border-left: 0.3rem solid var(--accent);
+      background: var(--surface);
+    }
+
+    .status-message:empty {
+      display: none;
+    }
+
+    .empty-state {
+      margin: var(--space-5) 0;
+      padding: var(--space-4);
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .empty-state p:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Sections */
+    .workspace-section {
+      min-width: 0;
+    }
+
+    .workspace-section + .workspace-section {
+      padding-top: var(--space-2);
+      border-top: 1px solid var(--border);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: var(--space-3);
+      flex-wrap: wrap;
+      margin-bottom: var(--space-3);
+    }
+
+    .section-header h1 {
+      margin-bottom: 0;
+    }
+
+    /* Tables */
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+    }
+
+    caption {
+      padding: var(--space-3) var(--space-4);
+      text-align: left;
+      font-weight: 700;
+      background: var(--surface-raised);
+      border-bottom: 1px solid var(--border);
+    }
+
+    th,
+    td {
+      padding: var(--space-3);
+      vertical-align: top;
+      text-align: left;
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    tr:last-child > * {
+      border-bottom: 0;
+    }
+
+    tr > *:last-child {
+      border-right: 0;
+    }
+
+    thead th {
+      background: var(--surface-raised);
+      font-weight: 700;
+    }
+
+    tbody th[scope="row"] {
+      font-weight: 700;
+    }
+
+    .statistics-table {
+      min-width: 38rem;
+    }
+
+    .task-table {
+      min-width: 66rem;
+    }
+
+    .task-id,
+    .task-step,
+    .task-date {
+      white-space: nowrap;
+    }
+
+    .task-text {
+      min-width: 16rem;
+      max-width: 38rem;
+      overflow-wrap: anywhere;
+    }
+
+    .task-actions {
+      min-width: 15rem;
+    }
+
+    .task-actions-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+
+    /* Forms */
+    form {
+      margin: 0;
+    }
+
+    .form-stack {
+      display: grid;
+      gap: var(--space-4);
+    }
+
+    .form-field {
+      display: grid;
+      gap: var(--space-1);
+    }
+
+    label,
+    legend {
+      font-weight: 650;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 0.55rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #111713;
+      color: var(--text);
+    }
+
+    input:hover,
+    select:hover,
+    textarea:hover {
+      border-color: var(--accent);
+    }
+
+    input:disabled,
+    select:disabled,
+    textarea:disabled {
+      cursor: not-allowed;
+      background: var(--disabled-bg);
+      color: var(--disabled-text);
+    }
+
+    textarea {
+      min-height: 8rem;
+    }
+
+    fieldset {
+      margin: 0;
+      padding: var(--space-4);
+      border: 1px solid var(--border);
+    }
+	
+	/* Queue view controls */
+.queue-view-controls {
+  width: 100%;
+  min-width: 0;
+  margin-bottom: var(--space-3);
+  overflow-x: auto;
+}
+
+.queue-view-fieldset {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: nowrap;
+  gap: var(--space-3);
+  width: max-content;
+  min-width: 100%;
+  padding: 0 0 var(--space-2);
+  border: 0;
+}
+
+.queue-view-field {
+  display: grid;
+  flex: 0 0 auto;
+  gap: var(--space-1);
+}
+
+.queue-view-field-filter {
+  width: 14rem;
+}
+
+.queue-view-field-sort {
+  width: 11rem;
+}
+
+.queue-view-field-direction {
+  width: 10rem;
+}
+
+.queue-view-field-search {
+  width: 18rem;
+}
+
+.queue-view-field select,
+.queue-view-field input {
+  width: 100%;
+}
+
+.queue-view-controls button {
+  flex: 0 0 auto;
+}
+
+.queue-view-count {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 2.5rem;
+  margin: 0;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+    .editable-list {
+      display: grid;
+      gap: var(--space-3);
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .editable-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: var(--space-3);
+      padding-bottom: var(--space-3);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .editable-item:last-child {
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+
+    .inline-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: var(--space-3);
+    }
+
+    .task-summary {
+      display: grid;
+      grid-template-columns: max-content minmax(0, 1fr);
+      gap: var(--space-2) var(--space-4);
+      margin-bottom: var(--space-4);
+    }
+
+    .task-summary dt {
+      font-weight: 700;
+    }
+
+    .task-summary dd {
+      margin: 0;
+      min-height: 1.5rem;
+      overflow-wrap: anywhere;
+    }
+
+    .journal-list {
+      margin: 0;
+      padding-left: 1.4rem;
+    }
+
+    .journal-list li + li {
+      margin-top: var(--space-2);
+    }
+
+    /* Buttons */
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-1);
+      min-width: 2.5rem;
+      padding: 0.5rem 0.8rem;
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      background: var(--accent-strong);
+      color: #ffffff;
+      font-weight: 650;
+      text-align: center;
+    }
+
+    button:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: var(--accent-hover);
+    }
+
+    button:active:not(:disabled) {
+      background: var(--accent-strong);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      border-color: #4b554f;
+      background: var(--disabled-bg);
+      color: var(--disabled-text);
+    }
+
+    /* Dialogs */
+    dialog {
+      width: min(46rem, calc(100vw - 2rem));
+      max-height: calc(100vh - 2rem);
+      padding: 0;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    dialog::backdrop {
+      background: #000000;
+    }
+
+    .dialog-content {
+      padding: var(--space-5);
+    }
+
+    .dialog-header {
+      margin-bottom: var(--space-4);
+      padding-bottom: var(--space-3);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dialog-header h2 {
+      margin-bottom: 0;
+    }
+
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      margin-top: var(--space-5);
+      padding-top: var(--space-4);
+      border-top: 1px solid var(--border);
+    }
+
+    .dialog-section + .dialog-section {
+      margin-top: var(--space-5);
+      padding-top: var(--space-4);
+      border-top: 1px solid var(--border);
+    }
+
+    .warning-text {
+      margin: var(--space-2) 0 0;
+      font-size: 0.9rem;
+      font-weight: 650;
+    }
+
+    /* Utilities */
+    .visually-hidden {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      padding: 0 !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0 0 0 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important;
+    }
+
+    /* Responsive rules */
+    @media (max-width: 700px) {
+      .app-shell {
+        padding-inline: var(--space-3);
+      }
+
+      .app-header {
+        padding-top: var(--space-4);
+      }
+
+      .primary-actions,
+      .dialog-actions {
+        align-items: stretch;
+      }
+
+      .primary-actions button,
+      .dialog-actions button {
+        flex: 1 1 10rem;
+      }
+
+      .editable-item,
+      .inline-form {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+      }
+
+      .editable-item > button,
+      .inline-form > button {
+        justify-self: start;
+      }
+
+      .task-summary {
+        grid-template-columns: 1fr;
+        gap: var(--space-1);
+      }
+
+      .task-summary dd + dt {
+        margin-top: var(--space-2);
+      }
+
+      .dialog-content {
+        padding: var(--space-4);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="app-header-row">
+        <p class="app-title">Simple Task Manager</p>
+        <p class="metadata" id="database-status" data-role="database-status">
+          No database opened
+        </p>
+      </div>
+    </header>
+
+    <div class="primary-actions" data-role="primary-actions">
+      <button type="button" data-action="create-database">
+        Create Database
+      </button>
+
+      <button type="button" data-action="open-database">
+        Open Database
+      </button>
+
+      <button type="button" data-action="close-database" hidden>
+        Close Database
+      </button>
+
+      <button type="button" data-action="save-data" hidden>
+        Save Data
+      </button>
+
+      <button
+        type="button"
+        data-action="manage-steps"
+        aria-haspopup="dialog"
+        aria-controls="manage-steps-dialog"
+        hidden
+      >
+        Manage Steps
+      </button>
+
+      <button
+        type="button"
+        data-action="manage-queues"
+        aria-haspopup="dialog"
+        aria-controls="manage-queues-dialog"
+        hidden
+      >
+        Manage Queues
+      </button>
+
+      <button
+        type="button"
+        data-action="add-tasks"
+        aria-haspopup="dialog"
+        aria-controls="add-tasks-dialog"
+        hidden
+      >
+        Add Tasks
+      </button>
+    </div>
+
+    <input
+      id="database-file-input"
+      type="file"
+      accept=".json,application/json"
+      data-role="database-file-input"
+      hidden
+    >
+
+    <div
+      id="status-message"
+      class="status-message"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      data-role="status-message"
+    ></div>
+
+    <main id="main-content">
+      <section
+        id="no-database-state"
+        class="empty-state"
+        data-view="no-database"
+      >
+        <h1>No Database Opened</h1>
+        <p>
+          No database is opened. Create a new database or open an existing JSON file.
+        </p>
+      </section>
+
+      <div
+        id="database-workspace"
+        class="database-workspace"
+        data-view="database-workspace"
+        hidden
+      >
+        <section
+          id="statistics-section"
+          class="workspace-section"
+          aria-labelledby="statistics-heading"
+        >
+          <div class="section-header">
+            <h1 id="statistics-heading">Statistics</h1>
+          </div>
+
+          <div
+            id="statistics-empty-state"
+            class="empty-state"
+            data-role="statistics-empty"
+          >
+            <p>No queues exist yet.</p>
+          </div>
+
+          <div
+            class="table-scroll"
+            data-role="statistics-table-container"
+            hidden
+          >
+            <table
+              class="statistics-table"
+              id="statistics-table"
+            >
+              <caption>Task counts by workflow step</caption>
+
+              <thead>
+                <tr data-role="statistics-header-row">
+                  <th scope="col">Queue</th>
+                </tr>
+              </thead>
+
+              <tbody data-role="statistics-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div
+          id="queues-container"
+          data-role="queues-container"
+        ></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Add Tasks dialog -->
+  <dialog
+    id="add-tasks-dialog"
+    aria-labelledby="add-tasks-title"
+    data-dialog="add-tasks"
+  >
+    <div class="dialog-content">
+      <header class="dialog-header">
+        <h2 id="add-tasks-title">Add Tasks</h2>
+      </header>
+
+      <form id="add-tasks-form" data-form="add-tasks">
+        <div class="form-stack">
+          <div class="form-field">
+            <label for="add-tasks-queue">Queue</label>
+
+            <select
+              id="add-tasks-queue"
+              name="queueId"
+              aria-describedby="add-tasks-queue-error"
+              required
+            ></select>
+
+            <p
+              id="add-tasks-queue-error"
+              class="field-error"
+              data-error-for="add-tasks-queue"
+              hidden
+            ></p>
+          </div>
+
+          <div class="form-field">
+            <label for="add-tasks-text">Tasks</label>
+
+            <textarea
+              id="add-tasks-text"
+              name="tasks"
+              rows="8"
+              aria-describedby="add-tasks-help add-tasks-text-error"
+              required
+            ></textarea>
+
+            <p id="add-tasks-help" class="field-help">
+              One task per line
+            </p>
+
+            <p
+              id="add-tasks-text-error"
+              class="field-error"
+              data-error-for="add-tasks-text"
+              hidden
+            ></p>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" data-action="cancel-dialog">
+            Cancel
+          </button>
+
+          <button type="submit" data-action="confirm-add-tasks">
+            Add Tasks
+          </button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Manage Steps dialog -->
+  <dialog
+    id="manage-steps-dialog"
+    aria-labelledby="manage-steps-title"
+    data-dialog="manage-steps"
+  >
+    <div class="dialog-content">
+      <header class="dialog-header">
+        <h2 id="manage-steps-title">Manage Steps</h2>
+      </header>
+
+      <form id="manage-steps-form" data-form="manage-steps">
+        <div class="dialog-section">
+          <h3>Workflow Steps</h3>
+
+          <ol
+            class="editable-list"
+            data-role="workflow-step-list"
+          ></ol>
+        </div>
+
+        <div class="dialog-section">
+          <h3>Add Step</h3>
+
+          <div class="inline-form">
+            <div class="form-field">
+              <label for="new-step-name">
+                New step name
+              </label>
+
+              <input
+                id="new-step-name"
+                name="newStepName"
+                type="text"
+                aria-describedby="new-step-error"
+              >
+
+              <p
+                id="new-step-error"
+                class="field-error"
+                data-error-for="new-step-name"
+                hidden
+              ></p>
+            </div>
+
+            <button type="button" data-action="add-step">
+              Add Step
+            </button>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" data-action="cancel-dialog">
+            Cancel
+          </button>
+
+          <button type="submit" data-action="save-steps">
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Manage Queues dialog -->
+  <dialog
+    id="manage-queues-dialog"
+    aria-labelledby="manage-queues-title"
+    data-dialog="manage-queues"
+  >
+    <div class="dialog-content">
+      <header class="dialog-header">
+        <h2 id="manage-queues-title">Manage Queues</h2>
+      </header>
+
+      <form id="manage-queues-form" data-form="manage-queues">
+        <div class="dialog-section">
+          <h3>Existing Queues</h3>
+
+          <ul
+            class="editable-list"
+            data-role="queue-list"
+          ></ul>
+        </div>
+
+        <div class="dialog-section">
+          <h3>Create Queue</h3>
+
+          <div class="inline-form">
+            <div class="form-field">
+              <label for="new-queue-name">
+                New queue name
+              </label>
+
+              <input
+                id="new-queue-name"
+                name="newQueueName"
+                type="text"
+                aria-describedby="new-queue-error"
+              >
+
+              <p
+                id="new-queue-error"
+                class="field-error"
+                data-error-for="new-queue-name"
+                hidden
+              ></p>
+            </div>
+
+            <button
+              type="button"
+              data-action="add-queue"
+            >
+              Add Queue
+            </button>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" data-action="cancel-dialog">
+            Cancel
+          </button>
+
+          <button type="submit" data-action="save-queues">
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Edit Task dialog -->
+  <dialog
+    id="edit-task-dialog"
+    aria-labelledby="edit-task-title"
+    data-dialog="edit-task"
+  >
+    <div class="dialog-content">
+      <header class="dialog-header">
+        <h2 id="edit-task-title">Edit Task</h2>
+      </header>
+
+      <form id="edit-task-form" data-form="edit-task">
+        <dl class="task-summary">
+          <dt>ID</dt>
+          <dd data-role="edit-task-id"></dd>
+
+          <dt>Current Step</dt>
+          <dd data-role="edit-task-step"></dd>
+        </dl>
+
+        <div class="form-stack">
+          <div class="form-field">
+            <label for="edit-task-text">
+              Task
+            </label>
+
+            <textarea
+              id="edit-task-text"
+              name="taskText"
+              rows="5"
+              aria-describedby="edit-task-text-error"
+              required
+            ></textarea>
+
+            <p
+              id="edit-task-text-error"
+              class="field-error"
+              data-error-for="edit-task-text"
+              hidden
+            ></p>
+          </div>
+
+          <div>
+            <button
+              type="button"
+              data-action="edit-task-next-step"
+              hidden
+            ></button>
+          </div>
+        </div>
+
+        <section
+          class="dialog-section"
+          aria-labelledby="task-journal-title"
+        >
+          <h3 id="task-journal-title">
+            Task Journal
+          </h3>
+
+          <ol
+            class="journal-list"
+            data-role="task-journal"
+          ></ol>
+        </section>
+
+        <div class="dialog-actions">
+          <button type="button" data-action="cancel-dialog">
+            Cancel
+          </button>
+
+          <button type="submit" data-action="save-task">
+            Save Task
+          </button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Dynamic templates -->
+  <template id="statistics-step-header-template">
+    <th scope="col"></th>
+  </template>
+
+  <template id="statistics-row-template">
+    <tr>
+      <th scope="row" data-role="statistics-queue-name"></th>
+    </tr>
+  </template>
+
+  <template id="statistics-cell-template">
+    <td></td>
+  </template>
+
+  <<template id="queue-section-template">
+  <section
+    class="workspace-section queue-section"
+    data-role="queue-section"
+  >
+    <div class="section-header">
+      <h1 data-role="queue-heading"></h1>
+    </div>
+
+    <form
+      class="queue-view-controls"
+      data-role="queue-view-form"
+    >
+      <fieldset class="queue-view-fieldset">
+        <legend
+          class="visually-hidden"
+          data-role="queue-view-legend"
+        >
+          Queue view controls
+        </legend>
+
+        <label class="queue-view-field queue-view-field-filter">
+          <span>Filter by Step</span>
+
+          <select
+            name="filterStep"
+            data-role="queue-filter-step"
+          >
+            <option value="">All Steps</option>
+          </select>
+        </label>
+
+        <label class="queue-view-field queue-view-field-sort">
+          <span>Sort by</span>
+
+          <select
+            name="sortField"
+            data-role="queue-sort-field"
+          >
+            <option value="id" selected>ID</option>
+            <option value="task">Task</option>
+            <option value="step">Step</option>
+            <option value="created">Created</option>
+            <option value="modified">Last Modified</option>
+          </select>
+        </label>
+
+        <label class="queue-view-field queue-view-field-direction">
+          <span>Sort Direction</span>
+
+          <select
+            name="sortDirection"
+            data-role="queue-sort-direction"
+          >
+            <option value="asc" selected>Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
+        </label>
+
+        <label class="queue-view-field queue-view-field-search">
+          <span>Search</span>
+
+          <input
+            type="search"
+            name="search"
+            autocomplete="off"
+            data-role="queue-search"
+          >
+        </label>
+
+        <button
+          type="submit"
+          data-action="apply-queue-view"
+        >
+          Apply
+        </button>
+
+        <p
+          class="queue-view-count"
+          data-role="queue-task-count"
+        >
+          Showing 0 of 0 tasks
+        </p>
+      </fieldset>
+    </form>
+
+    <div
+      class="empty-state"
+      data-role="queue-empty-state"
+      hidden
+    >
+      <p>This queue has no tasks.</p>
+    </div>
+
+    <div
+      class="empty-state"
+      data-role="queue-no-results"
+      hidden
+    >
+      <p>No tasks match the current filter or search.</p>
+    </div>
+
+    <div
+      class="table-scroll"
+      data-role="task-table-container"
+    >
+      <table class="task-table">
+        <caption data-role="task-table-caption"></caption>
+
+        <thead>
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">Task</th>
+            <th scope="col">Step</th>
+            <th scope="col">Created</th>
+            <th scope="col">Last Modified</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+
+        <tbody data-role="task-table-body"></tbody>
+      </table>
+    </div>
+  </section>
+</template>
+
+  <template id="task-row-template">
+    <tr data-role="task-row">
+      <td
+        class="task-id"
+        data-role="task-id"
+      ></td>
+
+      <td
+        class="task-text"
+        data-role="task-text"
+      ></td>
+
+      <td
+        class="task-step"
+        data-role="task-step"
+      ></td>
+
+      <td
+        class="task-date"
+        data-role="task-created"
+      ></td>
+
+      <td
+        class="task-date"
+        data-role="task-modified"
+      ></td>
+
+      <td class="task-actions">
+        <div class="task-actions-group">
+          <button
+            type="button"
+            data-action="next-step"
+            hidden
+          ></button>
+
+          <button
+            type="button"
+            data-action="edit-task"
+            aria-haspopup="dialog"
+            aria-controls="edit-task-dialog"
+          >
+            Edit
+          </button>
+
+          <button
+            type="button"
+            data-action="delete-task"
+          >
+            Delete
+          </button>
+        </div>
+      </td>
+    </tr>
+  </template>
+
+  <template id="workflow-step-template">
+    <li
+      class="editable-item"
+      data-role="workflow-step-item"
+    >
+      <div class="form-field">
+        <label data-role="workflow-step-label"></label>
+
+        <input
+          type="text"
+          data-role="workflow-step-name"
+        >
+
+        <p
+          class="field-error"
+          data-role="workflow-step-error"
+          hidden
+        ></p>
+      </div>
+    </li>
+  </template>
+
+  <template id="queue-manager-item-template">
+    <li
+      class="editable-item"
+      data-role="queue-manager-item"
+    >
+      <div class="form-field">
+        <label data-role="queue-name-label"></label>
+
+        <input
+          type="text"
+          data-role="queue-name-input"
+        >
+
+        <p
+          class="field-error"
+          data-role="queue-name-error"
+          hidden
+        ></p>
+
+        <p class="warning-text">
+          Deleting this queue will permanently delete all tasks in it.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        data-action="delete-queue"
+      >
+        Delete
+      </button>
+    </li>
+  </template>
+
+  <template id="task-journal-entry-template">
+    <li data-role="task-journal-entry">
+      <time data-role="journal-time"></time>
+      <span aria-hidden="true"> — </span>
+      <span data-role="journal-text"></span>
+    </li>
+  </template>
+
+  <script>
+    "use strict";
+
+// ============================================================
+// Application state
+// ============================================================
+
+const appState = {
+  database: null,
+  isDirty: false,
+  queueViews: new Map()
+};
+
+// ============================================================
+// Constants
+// ============================================================
+
+const UID_PREFIXES = Object.freeze({
+  workflowStep: "step",
+  queue: "queue",
+  task: "task"
+});
+
+const TIMESTAMP_PATTERN = /^(\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2})$/;
+
+// ============================================================
+// Utilities
+// ============================================================
+
+function isPlainObject(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isPositiveInteger(value) {
+  return Number.isInteger(value) && value >= 1;
+}
+
+function normalizeUserText(value) {
+  if (typeof value !== "string") {
+    throw new TypeError("User text must be a string.");
+  }
+
+  return value.trim();
+}
+
+function generateUid(prefix) {
+  if (!isNonEmptyString(prefix)) {
+    throw new TypeError("UID prefix must be a non-empty string.");
+  }
+
+  const normalizedPrefix = prefix.trim();
+  const cryptoApi = globalThis.crypto;
+
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
+    return `${normalizedPrefix}-${cryptoApi.randomUUID()}`;
+  }
+
+  if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    cryptoApi.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    const hex = Array.from(
+      bytes,
+      byte => byte.toString(16).padStart(2, "0")
+    );
+
+    const uuid = [
+      hex.slice(0, 4).join(""),
+      hex.slice(4, 6).join(""),
+      hex.slice(6, 8).join(""),
+      hex.slice(8, 10).join(""),
+      hex.slice(10, 16).join("")
+    ].join("-");
+
+    return `${normalizedPrefix}-${uuid}`;
+  }
+
+  const timePart = Date.now().toString(36);
+  const randomPart = [Math.random(), Math.random()]
+    .map(value => value.toString(36).slice(2))
+    .join("");
+
+  return `${normalizedPrefix}-${timePart}-${randomPart}`;
+}
+
+function formatCurrentTimestamp(date = new Date()) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    throw new TypeError("A valid Date instance is required.");
+  }
+
+  const year = String(date.getFullYear()).padStart(4, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${year}.${month}.${day} ${hours}:${minutes}`;
+}
+
+function isLeapYear(year) {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function daysInMonth(year, month) {
+  const monthLengths = [
+    31,
+    isLeapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31
+  ];
+
+  return monthLengths[month - 1] || 0;
+}
+
+function isValidTimestamp(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const match = TIMESTAMP_PATTERN.exec(value);
+
+  if (!match) {
+    return false;
+  }
+
+  const [, yearText, monthText, dayText, hourText, minuteText] = match;
+
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  if (
+    year < 1 ||
+    month < 1 ||
+    month > 12 ||
+    hour > 23 ||
+    minute > 59
+  ) {
+    return false;
+  }
+
+  return day >= 1 && day <= daysInMonth(year, month);
+}
+
+function hasOwn(object, property) {
+  return Object.prototype.hasOwnProperty.call(object, property);
+}
+
+function requireProperties(object, properties, context) {
+  for (const property of properties) {
+    if (!hasOwn(object, property)) {
+      throw new Error(
+        `Invalid database: ${context} is missing "${property}".`
+      );
+    }
+  }
+}
+
+// ============================================================
+// Database validation
+// ============================================================
+
+function validateWorkflow(workflow) {
+  const workflowIds = new Set();
+
+  workflow.forEach((step, index) => {
+    const context = `workflow step at index ${index}`;
+
+    if (!isPlainObject(step)) {
+      throw new Error(
+        `Invalid database: ${context} must be an object.`
+      );
+    }
+
+    requireProperties(step, ["id", "name"], context);
+
+    if (!isNonEmptyString(step.id)) {
+      throw new Error(
+        `Invalid database: ${context} has an invalid id.`
+      );
+    }
+
+    if (workflowIds.has(step.id)) {
+      throw new Error(
+        `Invalid database: duplicate workflow step id "${step.id}".`
+      );
+    }
+
+    if (!isNonEmptyString(step.name)) {
+      throw new Error(
+        `Invalid database: ${context} has an invalid name.`
+      );
+    }
+
+    workflowIds.add(step.id);
+  });
+
+  return workflowIds;
+}
+
+function validateJournal(journal, taskLabel) {
+  if (!Array.isArray(journal)) {
+    throw new Error(
+      `Invalid database: ${taskLabel} journal must be an array.`
+    );
+  }
+
+  journal.forEach((entry, index) => {
+    const context = `${taskLabel} journal entry at index ${index}`;
+
+    if (!isPlainObject(entry)) {
+      throw new Error(
+        `Invalid database: ${context} must be an object.`
+      );
+    }
+
+    requireProperties(entry, ["at", "text"], context);
+
+    if (!isValidTimestamp(entry.at)) {
+      throw new Error(
+        `Invalid database: ${context} has an invalid timestamp.`
+      );
+    }
+
+    if (!isNonEmptyString(entry.text)) {
+      throw new Error(
+        `Invalid database: ${context} has invalid text.`
+      );
+    }
+  });
+}
+
+function validateTask(
+  task,
+  queueIndex,
+  taskIndex,
+  workflowIds,
+  taskUids,
+  taskIds
+) {
+  const taskLabel =
+    `task at queues[${queueIndex}].tasks[${taskIndex}]`;
+
+  if (!isPlainObject(task)) {
+    throw new Error(
+      `Invalid database: ${taskLabel} must be an object.`
+    );
+  }
+
+  requireProperties(
+    task,
+    [
+      "uid",
+      "id",
+      "text",
+      "stepId",
+      "createdAt",
+      "updatedAt",
+      "journal"
+    ],
+    taskLabel
+  );
+
+  if (!isNonEmptyString(task.uid) || taskUids.has(task.uid)) {
+    const reason = taskUids.has(task.uid)
+      ? "duplicate"
+      : "invalid";
+
+    throw new Error(
+      `Invalid database: ${taskLabel} has a ${reason} uid.`
+    );
+  }
+
+  if (!isPositiveInteger(task.id) || taskIds.has(task.id)) {
+    const reason = taskIds.has(task.id)
+      ? "duplicate"
+      : "invalid";
+
+    throw new Error(
+      `Invalid database: ${taskLabel} has a ${reason} id.`
+    );
+  }
+
+  if (!isNonEmptyString(task.text)) {
+    throw new Error(
+      `Invalid database: ${taskLabel} has invalid text.`
+    );
+  }
+
+  if (
+    !isNonEmptyString(task.stepId) ||
+    !workflowIds.has(task.stepId)
+  ) {
+    throw new Error(
+      `Invalid database: task ${task.id} references an unknown workflow step.`
+    );
+  }
+
+  if (
+    !isValidTimestamp(task.createdAt) ||
+    !isValidTimestamp(task.updatedAt)
+  ) {
+    throw new Error(
+      `Invalid database: task ${task.id} has an invalid timestamp.`
+    );
+  }
+
+  validateJournal(task.journal, `task ${task.id}`);
+
+  taskUids.add(task.uid);
+  taskIds.add(task.id);
+
+  return task.id;
+}
+
+function validateQueues(queues, workflowIds) {
+  const queueIds = new Set();
+  const queueNames = new Set();
+  const taskUids = new Set();
+  const taskIds = new Set();
+
+  let maxTaskId = 0;
+
+  queues.forEach((queue, queueIndex) => {
+    const context = `queue at index ${queueIndex}`;
+
+    if (!isPlainObject(queue)) {
+      throw new Error(
+        `Invalid database: ${context} must be an object.`
+      );
+    }
+
+    requireProperties(
+      queue,
+      ["id", "name", "tasks"],
+      context
+    );
+
+    validateQueueIdentity(
+      queue,
+      context,
+      queueIds,
+      queueNames
+    );
+
+    if (!Array.isArray(queue.tasks)) {
+      throw new Error(
+        `Invalid database: ${context} tasks must be an array.`
+      );
+    }
+
+    queue.tasks.forEach((task, taskIndex) => {
+      const taskId = validateTask(
+        task,
+        queueIndex,
+        taskIndex,
+        workflowIds,
+        taskUids,
+        taskIds
+      );
+
+      maxTaskId = Math.max(maxTaskId, taskId);
+    });
+  });
+
+  return maxTaskId;
+}
+
+function validateQueueIdentity(
+  queue,
+  context,
+  queueIds,
+  queueNames
+) {
+  if (!isNonEmptyString(queue.id)) {
+    throw new Error(
+      `Invalid database: ${context} has an invalid id.`
+    );
+  }
+
+  if (queueIds.has(queue.id)) {
+    throw new Error(
+      `Invalid database: duplicate queue id "${queue.id}".`
+    );
+  }
+
+  if (!isNonEmptyString(queue.name)) {
+    throw new Error(
+      `Invalid database: ${context} has an invalid name.`
+    );
+  }
+
+  const normalizedName = queue.name.trim();
+
+  if (queueNames.has(normalizedName)) {
+    throw new Error(
+      `Invalid database: duplicate queue name "${normalizedName}".`
+    );
+  }
+
+  queueIds.add(queue.id);
+  queueNames.add(normalizedName);
+}
+
+function validateDatabase(data) {
+  if (!isPlainObject(data)) {
+    throw new Error(
+      "Invalid database: root value must be an object."
+    );
+  }
+
+  requireProperties(
+    data,
+    ["nextTaskId", "workflow", "queues"],
+    "root object"
+  );
+
+  if (!isPositiveInteger(data.nextTaskId)) {
+    throw new Error(
+      'Invalid database: "nextTaskId" must be an integer greater than or equal to 1.'
+    );
+  }
+
+  if (!Array.isArray(data.workflow)) {
+    throw new Error(
+      'Invalid database: "workflow" must be an array.'
+    );
+  }
+
+  if (!Array.isArray(data.queues)) {
+    throw new Error(
+      'Invalid database: "queues" must be an array.'
+    );
+  }
+
+  const workflowIds = validateWorkflow(data.workflow);
+  const maxTaskId = validateQueues(
+    data.queues,
+    workflowIds
+  );
+
+  if (
+    maxTaskId > 0 &&
+    data.nextTaskId <= maxTaskId
+  ) {
+    throw new Error(
+      'Invalid database: "nextTaskId" must be greater than every existing task id.'
+    );
+  }
+
+  return data;
+}
+
+// ============================================================
+// Dirty state
+// ============================================================
+
+function markDirty() {
+  if (appState.database === null) {
+    return false;
+  }
+
+  appState.isDirty = true;
+
+  return true;
+}
+
+function markSaved() {
+  appState.isDirty = false;
+}
+
+function hasUnsavedChanges() {
+  return (
+    appState.database !== null &&
+    appState.isDirty === true
+  );
+}
+
+// ============================================================
+// Database lifecycle
+// ============================================================
+
+function getDatabase() {
+  return appState.database;
+}
+
+function createDatabase() {
+  const database = {
+    nextTaskId: 1,
+    workflow: [],
+    queues: []
+  };
+
+  clearQueueViewSettings();
+
+  appState.database = database;
+  appState.isDirty = true;
+
+  return database;
+}
+
+function setLoadedDatabase(data) {
+  validateDatabase(data);
+
+  clearQueueViewSettings();
+
+  appState.database = data;
+  appState.isDirty = false;
+
+  return data;
+}
+
+function clearDatabase() {
+  clearQueueViewSettings();
+
+  appState.database = null;
+  appState.isDirty = false;
+}
+
+// ============================================================
+// beforeunload protection
+// ============================================================
+
+function handleBeforeUnload(event) {
+  if (!hasUnsavedChanges()) {
+    return;
+  }
+
+  event.preventDefault();
+  event.returnValue = true;
+}
+
+window.addEventListener(
+  "beforeunload",
+  handleBeforeUnload
+);
+
+// ============================================================
+// Domain helpers
+// ============================================================
+
+function requireOpenDatabase() {
+  const database = getDatabase();
+
+  if (database === null) {
+    throw new Error("No database is open.");
+  }
+
+  return database;
+}
+
+function requireEntityId(value, label) {
+  if (!isNonEmptyString(value)) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+// ============================================================
+// Workflow operations
+// ============================================================
+
+function getWorkflowStepById(database, stepId) {
+  requireEntityId(stepId, "Workflow step ID");
+
+  return database.workflow.find(step => step.id === stepId) || null;
+}
+
+function requireWorkflowStep(database, stepId) {
+  const step = getWorkflowStepById(database, stepId);
+
+  if (step === null) {
+    throw new Error(`Unknown workflow step "${stepId}".`);
+  }
+
+  return step;
+}
+
+function getFirstWorkflowStep(database) {
+  return database.workflow.length > 0
+    ? database.workflow[0]
+    : null;
+}
+
+function getNextWorkflowStep(database, stepId) {
+  requireEntityId(stepId, "Workflow step ID");
+
+  const currentIndex = database.workflow.findIndex(
+    step => step.id === stepId
+  );
+
+  if (currentIndex === -1) {
+    throw new Error(`Unknown workflow step "${stepId}".`);
+  }
+
+  return database.workflow[currentIndex + 1] || null;
+}
+
+function addWorkflowStep(name) {
+  const database = requireOpenDatabase();
+  const normalizedName = normalizeUserText(name);
+
+  if (normalizedName.length === 0) {
+    throw new Error("Workflow step name must not be empty.");
+  }
+
+  const stepId = generateUid(UID_PREFIXES.workflowStep);
+
+  if (database.workflow.some(step => step.id === stepId)) {
+    throw new Error(
+      `Generated workflow step ID "${stepId}" already exists.`
+    );
+  }
+
+  const step = {
+    id: stepId,
+    name: normalizedName
+  };
+
+  database.workflow.push(step);
+  markDirty();
+
+  return step;
+}
+
+function renameWorkflowStep(stepId, newName) {
+  const database = requireOpenDatabase();
+  const step = requireWorkflowStep(database, stepId);
+  const normalizedName = normalizeUserText(newName);
+
+  if (normalizedName.length === 0) {
+    throw new Error("Workflow step name must not be empty.");
+  }
+
+  if (normalizedName === step.name) {
+    return step;
+  }
+
+  step.name = normalizedName;
+  markDirty();
+
+  return step;
+}
+
+// ============================================================
+// Queue operations
+// ============================================================
+
+function getQueueById(database, queueId) {
+  requireEntityId(queueId, "Queue ID");
+
+  return database.queues.find(queue => queue.id === queueId) || null;
+}
+
+function requireQueue(database, queueId) {
+  const queue = getQueueById(database, queueId);
+
+  if (queue === null) {
+    throw new Error(`Unknown queue "${queueId}".`);
+  }
+
+  return queue;
+}
+
+function isQueueNameTaken(
+  database,
+  normalizedName,
+  excludedQueueId = null
+) {
+  return database.queues.some(queue => (
+    queue.id !== excludedQueueId &&
+    queue.name.trim() === normalizedName
+  ));
+}
+
+function requireAvailableQueueName(
+  database,
+  name,
+  excludedQueueId = null
+) {
+  const normalizedName = normalizeUserText(name);
+
+  if (normalizedName.length === 0) {
+    throw new Error("Queue name must not be empty.");
+  }
+
+  if (
+    isQueueNameTaken(
+      database,
+      normalizedName,
+      excludedQueueId
+    )
+  ) {
+    throw new Error(
+      `Queue name "${normalizedName}" already exists.`
+    );
+  }
+
+  return normalizedName;
+}
+
+function createQueue(name) {
+  const database = requireOpenDatabase();
+  const normalizedName = requireAvailableQueueName(
+    database,
+    name
+  );
+
+  if (getFirstWorkflowStep(database) === null) {
+    throw new Error(
+      "Cannot create a queue without a workflow step."
+    );
+  }
+
+  const queueId = generateUid(UID_PREFIXES.queue);
+
+  if (database.queues.some(queue => queue.id === queueId)) {
+    throw new Error(
+      `Generated queue ID "${queueId}" already exists.`
+    );
+  }
+
+  const queue = {
+    id: queueId,
+    name: normalizedName,
+    tasks: []
+  };
+
+  database.queues.push(queue);
+  markDirty();
+
+  return queue;
+}
+
+function renameQueue(queueId, newName) {
+  const database = requireOpenDatabase();
+  const queue = requireQueue(database, queueId);
+  const normalizedName = normalizeUserText(newName);
+
+  if (normalizedName.length === 0) {
+    throw new Error("Queue name must not be empty.");
+  }
+
+  if (normalizedName === queue.name) {
+    return queue;
+  }
+
+  if (
+    isQueueNameTaken(
+      database,
+      normalizedName,
+      queue.id
+    )
+  ) {
+    throw new Error(
+      `Queue name "${normalizedName}" already exists.`
+    );
+  }
+
+  queue.name = normalizedName;
+  markDirty();
+
+  return queue;
+}
+
+function deleteQueue(queueId) {
+  const database = requireOpenDatabase();
+  const queue = requireQueue(database, queueId);
+  const queueIndex = database.queues.indexOf(queue);
+
+  database.queues.splice(queueIndex, 1);
+  deleteQueueViewSettings(queue.id);
+  markDirty();
+
+  return queue;
+}
+
+// ============================================================
+// Queue view operations
+// ============================================================
+
+const QUEUE_VIEW_SORT_FIELDS = new Set([
+  "id",
+  "task",
+  "step",
+  "created",
+  "modified"
+]);
+
+const QUEUE_VIEW_SORT_DIRECTIONS = new Set([
+  "asc",
+  "desc"
+]);
+
+const QUEUE_VIEW_SORT_LABELS = Object.freeze({
+  id: "ID",
+  task: "Task",
+  step: "Step",
+  created: "Created",
+  modified: "Last Modified"
+});
+
+function createDefaultQueueViewSettings() {
+  return {
+    filterStepId: "",
+    sortField: "id",
+    sortDirection: "asc",
+    searchQuery: ""
+  };
+}
+
+function normalizeQueueViewSettings(
+  database,
+  settings
+) {
+  const defaults =
+    createDefaultQueueViewSettings();
+
+  if (!isPlainObject(settings)) {
+    return defaults;
+  }
+
+  const validFilterStep =
+    typeof settings.filterStepId === "string" &&
+    (
+      settings.filterStepId === "" ||
+      database.workflow.some(
+        step => step.id === settings.filterStepId
+      )
+    );
+
+  return {
+    filterStepId: validFilterStep
+      ? settings.filterStepId
+      : defaults.filterStepId,
+
+    sortField:
+      QUEUE_VIEW_SORT_FIELDS.has(settings.sortField)
+        ? settings.sortField
+        : defaults.sortField,
+
+    sortDirection:
+      QUEUE_VIEW_SORT_DIRECTIONS.has(
+        settings.sortDirection
+      )
+        ? settings.sortDirection
+        : defaults.sortDirection,
+
+    searchQuery:
+      typeof settings.searchQuery === "string"
+        ? settings.searchQuery.trim()
+        : defaults.searchQuery
+  };
+}
+
+function getQueueViewSettings(
+  database,
+  queueId
+) {
+  requireQueue(database, queueId);
+
+  const settings = normalizeQueueViewSettings(
+    database,
+    appState.queueViews.get(queueId)
+  );
+
+  appState.queueViews.set(
+    queueId,
+    settings
+  );
+
+  return settings;
+}
+
+function saveQueueViewSettings(
+  database,
+  queueId,
+  settings
+) {
+  requireQueue(database, queueId);
+
+  const normalizedSettings =
+    normalizeQueueViewSettings(
+      database,
+      settings
+    );
+
+  appState.queueViews.set(
+    queueId,
+    normalizedSettings
+  );
+
+  return normalizedSettings;
+}
+
+function deleteQueueViewSettings(queueId) {
+  requireEntityId(queueId, "Queue ID");
+  return appState.queueViews.delete(queueId);
+}
+
+function clearQueueViewSettings() {
+  appState.queueViews.clear();
+}
+
+function compareQueueViewTasks(
+  leftTask,
+  rightTask,
+  sortField,
+  workflowOrder
+) {
+  switch (sortField) {
+    case "task":
+      return leftTask.text.localeCompare(
+        rightTask.text,
+        undefined,
+        {
+          numeric: true,
+          sensitivity: "base"
+        }
+      );
+
+    case "step":
+      return (
+        workflowOrder.get(leftTask.stepId) -
+        workflowOrder.get(rightTask.stepId)
+      );
+
+    case "created":
+      return leftTask.createdAt.localeCompare(
+        rightTask.createdAt
+      );
+
+    case "modified":
+      return leftTask.updatedAt.localeCompare(
+        rightTask.updatedAt
+      );
+
+    case "id":
+    default:
+      return leftTask.id - rightTask.id;
+  }
+}
+
+function getQueueViewResult(
+  database,
+  queue
+) {
+  const settings = getQueueViewSettings(
+    database,
+    queue.id
+  );
+
+  const query =
+    settings.searchQuery.toLowerCase();
+
+  const workflowOrder = new Map(
+    database.workflow.map(
+      (step, index) => [step.id, index]
+    )
+  );
+
+  let entries = queue.tasks.map(
+    (task, index) => ({
+      task,
+      index
+    })
+  );
+
+  if (settings.filterStepId !== "") {
+    entries = entries.filter(
+      entry =>
+        entry.task.stepId ===
+        settings.filterStepId
+    );
+  }
+
+  if (query !== "") {
+    entries = entries.filter(
+      entry =>
+        entry.task.text
+          .toLowerCase()
+          .includes(query)
+    );
+  }
+
+  const direction =
+    settings.sortDirection === "desc"
+      ? -1
+      : 1;
+
+  entries.sort((left, right) => {
+    const comparison =
+      compareQueueViewTasks(
+        left.task,
+        right.task,
+        settings.sortField,
+        workflowOrder
+      );
+
+    return comparison === 0
+      ? left.index - right.index
+      : comparison * direction;
+  });
+
+  return {
+    settings,
+    tasks: entries.map(
+      entry => entry.task
+    ),
+    visibleCount: entries.length,
+    totalCount: queue.tasks.length
+  };
+}
+
+// ============================================================
+// Task journal
+// ============================================================
+
+function appendTaskJournalEntry(task, timestamp, text) {
+  if (!Array.isArray(task.journal)) {
+    throw new Error(
+      `Task ${task.id} has an invalid journal.`
+    );
+  }
+
+  if (!isValidTimestamp(timestamp)) {
+    throw new TypeError(
+      "Journal timestamp is invalid."
+    );
+  }
+
+  if (!isNonEmptyString(text)) {
+    throw new TypeError(
+      "Journal text must be a non-empty string."
+    );
+  }
+
+  const entry = {
+    at: timestamp,
+    text
+  };
+
+  task.journal.push(entry);
+
+  return entry;
+}
+
+// ============================================================
+// Task operations
+// ============================================================
+
+function getTaskByUid(queue, taskUid) {
+  requireEntityId(taskUid, "Task UID");
+
+  return queue.tasks.find(
+    task => task.uid === taskUid
+  ) || null;
+}
+
+function requireTask(queue, taskUid) {
+  const task = getTaskByUid(queue, taskUid);
+
+  if (task === null) {
+    throw new Error(
+      `Unknown task "${taskUid}" in queue "${queue.id}".`
+    );
+  }
+
+  return task;
+}
+
+function collectTaskUids(database) {
+  const taskUids = new Set();
+
+  for (const queue of database.queues) {
+    for (const task of queue.tasks) {
+      taskUids.add(task.uid);
+    }
+  }
+
+  return taskUids;
+}
+
+function normalizeTaskTexts(taskTexts) {
+  if (!Array.isArray(taskTexts)) {
+    throw new TypeError(
+      "Task texts must be provided as an array."
+    );
+  }
+
+  const normalizedTexts = [];
+
+  for (const taskText of taskTexts) {
+    if (typeof taskText !== "string") {
+      throw new TypeError(
+        "Every task text must be a string."
+      );
+    }
+
+    const normalizedText = normalizeUserText(taskText);
+
+    if (normalizedText.length > 0) {
+      normalizedTexts.push(normalizedText);
+    }
+  }
+
+  if (normalizedTexts.length === 0) {
+    throw new Error(
+      "At least one non-empty task text is required."
+    );
+  }
+
+  return normalizedTexts;
+}
+
+function buildTask(
+  text,
+  stepId,
+  taskId,
+  timestamp,
+  reservedUids
+) {
+  const taskUid = generateUid(UID_PREFIXES.task);
+
+  if (reservedUids.has(taskUid)) {
+    throw new Error(
+      `Generated task UID "${taskUid}" already exists.`
+    );
+  }
+
+  const task = {
+    uid: taskUid,
+    id: taskId,
+    text,
+    stepId,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    journal: []
+  };
+
+  appendTaskJournalEntry(
+    task,
+    timestamp,
+    "Task created"
+  );
+
+  reservedUids.add(taskUid);
+
+  return task;
+}
+
+function createTasks(queueId, taskTexts) {
+  const database = requireOpenDatabase();
+
+  requireEntityId(queueId, "Queue ID");
+
+  const normalizedTexts = normalizeTaskTexts(taskTexts);
+  const queue = requireQueue(database, queueId);
+  const firstStep = getFirstWorkflowStep(database);
+
+  if (firstStep === null) {
+    throw new Error(
+      "Cannot create tasks without a workflow step."
+    );
+  }
+
+  const timestamp = formatCurrentTimestamp();
+  const reservedUids = collectTaskUids(database);
+  const startTaskId = database.nextTaskId;
+
+  const tasks = normalizedTexts.map(
+    (text, index) => buildTask(
+      text,
+      firstStep.id,
+      startTaskId + index,
+      timestamp,
+      reservedUids
+    )
+  );
+
+  queue.tasks.push(...tasks);
+  database.nextTaskId = startTaskId + tasks.length;
+  markDirty();
+
+  return tasks;
+}
+
+function updateTaskText(queueId, taskUid, newText) {
+  const database = requireOpenDatabase();
+  const queue = requireQueue(database, queueId);
+  const task = requireTask(queue, taskUid);
+  const normalizedText = normalizeUserText(newText);
+
+  if (normalizedText.length === 0) {
+    throw new Error(
+      "Task text must not be empty."
+    );
+  }
+
+  if (normalizedText === task.text) {
+    return task;
+  }
+
+  if (!Array.isArray(task.journal)) {
+    throw new Error(
+      `Task ${task.id} has an invalid journal.`
+    );
+  }
+
+  const timestamp = formatCurrentTimestamp();
+  const journalText = "Task text changed";
+
+  task.text = normalizedText;
+  task.updatedAt = timestamp;
+
+  appendTaskJournalEntry(
+    task,
+    timestamp,
+    journalText
+  );
+
+  markDirty();
+
+  return task;
+}
+
+function moveTaskToNextStep(queueId, taskUid) {
+  const database = requireOpenDatabase();
+  const queue = requireQueue(database, queueId);
+  const task = requireTask(queue, taskUid);
+  const currentStep = requireWorkflowStep(
+    database,
+    task.stepId
+  );
+  const nextStep = getNextWorkflowStep(
+    database,
+    currentStep.id
+  );
+
+  if (nextStep === null) {
+    throw new Error(
+      `Task ${task.id} is already on the final workflow step.`
+    );
+  }
+
+  if (!Array.isArray(task.journal)) {
+    throw new Error(
+      `Task ${task.id} has an invalid journal.`
+    );
+  }
+
+  const timestamp = formatCurrentTimestamp();
+  const journalText =
+    `Moved to step "${nextStep.name}"`;
+
+  task.stepId = nextStep.id;
+  task.updatedAt = timestamp;
+
+  appendTaskJournalEntry(
+    task,
+    timestamp,
+    journalText
+  );
+
+  markDirty();
+
+  return task;
+}
+
+function deleteTask(queueId, taskUid) {
+  const database = requireOpenDatabase();
+  const queue = requireQueue(database, queueId);
+  const task = requireTask(queue, taskUid);
+  const taskIndex = queue.tasks.indexOf(task);
+
+  queue.tasks.splice(taskIndex, 1);
+  markDirty();
+
+  return task;
+}
+
+// ============================================================
+// File I/O
+// ============================================================
+
+const DATABASE_DOWNLOAD_FILENAME = "stm-data.json";
+
+async function loadDatabaseFromFile(file) {
+  if (!(file instanceof File)) {
+    throw new TypeError("A valid File object is required.");
+  }
+
+  const jsonText = await file.text();
+  const data = JSON.parse(jsonText);
+
+  return setLoadedDatabase(data);
+}
+
+function triggerJsonDownload(jsonText, fileName) {
+  const blob = new Blob(
+    [jsonText],
+    { type: "application/json;charset=utf-8" }
+  );
+  const objectUrl = URL.createObjectURL(blob);
+  let downloadLink = null;
+  let downloadTriggered = false;
+
+  try {
+    downloadLink = document.createElement("a");
+    downloadLink.href = objectUrl;
+    downloadLink.download = fileName;
+    document.body.append(downloadLink);
+    downloadLink.click();
+    downloadTriggered = true;
+  } finally {
+    if (downloadLink !== null) {
+      downloadLink.remove();
+    }
+
+    if (downloadTriggered) {
+      setTimeout(
+        () => URL.revokeObjectURL(objectUrl),
+        0
+      );
+    } else {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+}
+
+function saveDatabaseToFile() {
+  const database = requireOpenDatabase();
+  const jsonText = JSON.stringify(database, null, 2);
+
+  triggerJsonDownload(
+    jsonText,
+    DATABASE_DOWNLOAD_FILENAME
+  );
+  markSaved();
+
+  return database;
+}
+
+// ============================================================
+// Main rendering
+// ============================================================
+
+function requireRenderElement(selector, root = document) {
+  const element = root.querySelector(selector);
+
+  if (element === null) {
+    throw new Error(
+      `Rendering requires DOM element "${selector}".`
+    );
+  }
+
+  return element;
+}
+
+function cloneRenderTemplate(template, templateId) {
+  const element = template.content.firstElementChild;
+
+  if (element === null) {
+    throw new Error(
+      `Rendering template "${templateId}" is empty.`
+    );
+  }
+
+  return element.cloneNode(true);
+}
+
+const renderDom = Object.freeze({
+  databaseStatus: requireRenderElement('[data-role="database-status"]'),
+  noDatabaseView: requireRenderElement('[data-view="no-database"]'),
+  databaseWorkspace: requireRenderElement('[data-view="database-workspace"]'),
+  createDatabaseButton: requireRenderElement('[data-action="create-database"]'),
+  openDatabaseButton: requireRenderElement('[data-action="open-database"]'),
+  closeDatabaseButton: requireRenderElement('[data-action="close-database"]'),
+  saveDataButton: requireRenderElement('[data-action="save-data"]'),
+  manageStepsButton: requireRenderElement('[data-action="manage-steps"]'),
+  manageQueuesButton: requireRenderElement('[data-action="manage-queues"]'),
+  addTasksButton: requireRenderElement('[data-action="add-tasks"]'),
+  statisticsHeaderRow: requireRenderElement('[data-role="statistics-header-row"]'),
+  statisticsBody: requireRenderElement('[data-role="statistics-body"]'),
+  statisticsEmpty: requireRenderElement('[data-role="statistics-empty"]'),
+  statisticsTableContainer: requireRenderElement('[data-role="statistics-table-container"]'),
+  queuesContainer: requireRenderElement('[data-role="queues-container"]'),
+  statisticsStepHeaderTemplate: requireRenderElement('#statistics-step-header-template'),
+  statisticsRowTemplate: requireRenderElement('#statistics-row-template'),
+  statisticsCellTemplate: requireRenderElement('#statistics-cell-template'),
+  queueSectionTemplate: requireRenderElement('#queue-section-template'),
+  taskRowTemplate: requireRenderElement('#task-row-template')
+});
+
+function renderApplicationState(database) {
+  const isOpen = database !== null;
+
+  renderDom.noDatabaseView.hidden = isOpen;
+  renderDom.databaseWorkspace.hidden = !isOpen;
+  renderDom.databaseStatus.textContent = isOpen
+    ? "Database opened"
+    : "No database opened";
+
+  renderDom.createDatabaseButton.hidden = isOpen;
+  renderDom.openDatabaseButton.hidden = isOpen;
+  renderDom.closeDatabaseButton.hidden = !isOpen;
+  renderDom.saveDataButton.hidden = !isOpen;
+  renderDom.manageStepsButton.hidden = !isOpen;
+  renderDom.manageQueuesButton.hidden = !isOpen;
+  renderDom.addTasksButton.hidden = !isOpen;
+
+  const hasWorkflow = isOpen && database.workflow.length > 0;
+  const hasQueues = isOpen && database.queues.length > 0;
+
+  renderDom.manageQueuesButton.disabled = isOpen && !hasWorkflow;
+  renderDom.addTasksButton.disabled =
+    isOpen && (!hasWorkflow || !hasQueues);
+}
+
+function clearRenderedStatistics() {
+  while (renderDom.statisticsHeaderRow.children.length > 1) {
+    renderDom.statisticsHeaderRow.lastElementChild.remove();
+  }
+
+  renderDom.statisticsBody.replaceChildren();
+}
+
+function renderStatisticsHeaders(workflow) {
+  const fragment = document.createDocumentFragment();
+
+  for (const step of workflow) {
+    const header = cloneRenderTemplate(
+      renderDom.statisticsStepHeaderTemplate,
+      "statistics-step-header-template"
+    );
+
+    header.textContent = step.name;
+    fragment.append(header);
+  }
+
+  renderDom.statisticsHeaderRow.append(fragment);
+}
+
+function renderStatisticsRow(queue, workflow) {
+  const row = cloneRenderTemplate(
+    renderDom.statisticsRowTemplate,
+    "statistics-row-template"
+  );
+  const queueName = requireRenderElement(
+    '[data-role="statistics-queue-name"]',
+    row
+  );
+  const counts = new Map();
+
+  queueName.textContent = queue.name;
+
+  for (const task of queue.tasks) {
+    counts.set(
+      task.stepId,
+      (counts.get(task.stepId) || 0) + 1
+    );
+  }
+
+  for (const step of workflow) {
+    const cell = cloneRenderTemplate(
+      renderDom.statisticsCellTemplate,
+      "statistics-cell-template"
+    );
+
+    cell.textContent = String(counts.get(step.id) || 0);
+    row.append(cell);
+  }
+
+  return row;
+}
+
+function renderStatistics(database) {
+  clearRenderedStatistics();
+
+  const hasQueues = database.queues.length > 0;
+
+  renderDom.statisticsEmpty.hidden = hasQueues;
+  renderDom.statisticsTableContainer.hidden = !hasQueues;
+
+  if (!hasQueues) {
+    return;
+  }
+
+  renderStatisticsHeaders(database.workflow);
+
+  const fragment = document.createDocumentFragment();
+
+  for (const queue of database.queues) {
+    fragment.append(
+      renderStatisticsRow(queue, database.workflow)
+    );
+  }
+
+  renderDom.statisticsBody.append(fragment);
+}
+
+function renderTaskRow(database, queue, task) {
+  const row = cloneRenderTemplate(
+    renderDom.taskRowTemplate,
+    "task-row-template"
+  );
+  const currentStep = requireWorkflowStep(
+    database,
+    task.stepId
+  );
+  const nextStep = getNextWorkflowStep(
+    database,
+    currentStep.id
+  );
+
+  row.dataset.queueId = queue.id;
+  row.dataset.taskUid = task.uid;
+
+  requireRenderElement(
+    '[data-role="task-id"]',
+    row
+  ).textContent = String(task.id);
+
+  requireRenderElement(
+    '[data-role="task-text"]',
+    row
+  ).textContent = task.text;
+
+  requireRenderElement(
+    '[data-role="task-step"]',
+    row
+  ).textContent = currentStep.name;
+
+  requireRenderElement(
+    '[data-role="task-created"]',
+    row
+  ).textContent = task.createdAt;
+
+  requireRenderElement(
+    '[data-role="task-modified"]',
+    row
+  ).textContent = task.updatedAt;
+
+  const nextButton = requireRenderElement(
+    '[data-action="next-step"]',
+    row
+  );
+
+  nextButton.hidden = nextStep === null;
+  nextButton.textContent = nextStep === null
+    ? ""
+    : `Go to ${nextStep.name}`;
+
+  return row;
+}
+
+function getQueueViewRenderElements(section) {
+  return {
+    filterStep: requireRenderElement(
+      '[data-role="queue-filter-step"]',
+      section
+    ),
+    sortField: requireRenderElement(
+      '[data-role="queue-sort-field"]',
+      section
+    ),
+    sortDirection: requireRenderElement(
+      '[data-role="queue-sort-direction"]',
+      section
+    ),
+    search: requireRenderElement(
+      '[data-role="queue-search"]',
+      section
+    ),
+    applyButton: requireRenderElement(
+      '[data-action="apply-queue-view"]',
+      section
+    ),
+    count: requireRenderElement(
+      '[data-role="queue-task-count"]',
+      section
+    ),
+    emptyState: requireRenderElement(
+      '[data-role="queue-empty-state"]',
+      section
+    ),
+    noResults: requireRenderElement(
+      '[data-role="queue-no-results"]',
+      section
+    ),
+    tableContainer: requireRenderElement(
+      '[data-role="task-table-container"]',
+      section
+    ),
+    taskBody: requireRenderElement(
+      '[data-role="task-table-body"]',
+      section
+    )
+  };
+}
+
+function renderQueueFilterOptions(
+  database,
+  filterSelect,
+  selectedStepId
+) {
+  const allStepsOption =
+    filterSelect.options[0];
+
+  if (
+    !(allStepsOption instanceof HTMLOptionElement) ||
+    allStepsOption.value !== ""
+  ) {
+    throw new Error(
+      "Queue step filter requires the All Steps option."
+    );
+  }
+
+  filterSelect.replaceChildren(
+    allStepsOption
+  );
+
+  const fragment =
+    document.createDocumentFragment();
+
+  for (const step of database.workflow) {
+    const option =
+      document.createElement("option");
+
+    option.value = step.id;
+    option.textContent = step.name;
+    fragment.append(option);
+  }
+
+  filterSelect.append(fragment);
+  filterSelect.value = selectedStepId;
+}
+
+function renderTaskRows(
+  database,
+  queue,
+  tasks,
+  taskBody
+) {
+  const fragment =
+    document.createDocumentFragment();
+
+  for (const task of tasks) {
+    fragment.append(
+      renderTaskRow(
+        database,
+        queue,
+        task
+      )
+    );
+  }
+
+  taskBody.append(fragment);
+}
+
+function renderQueueSection(database, queue) {
+  const section = cloneRenderTemplate(
+    renderDom.queueSectionTemplate,
+    "queue-section-template"
+  );
+
+  section.dataset.queueId = queue.id;
+
+  requireRenderElement(
+    '[data-role="queue-heading"]',
+    section
+  ).textContent = queue.name;
+
+  requireRenderElement(
+    '[data-role="task-table-caption"]',
+    section
+  ).textContent = `Tasks in ${queue.name}`;
+
+  const elements =
+    getQueueViewRenderElements(section);
+
+  const view = getQueueViewResult(
+    database,
+    queue
+  );
+
+  renderQueueFilterOptions(
+    database,
+    elements.filterStep,
+    view.settings.filterStepId
+  );
+
+  elements.sortField.value =
+    view.settings.sortField;
+
+  elements.sortDirection.value =
+    view.settings.sortDirection;
+
+  elements.search.value =
+    view.settings.searchQuery;
+
+  elements.count.textContent =
+    `Showing ${view.visibleCount} of ${view.totalCount} tasks`;
+
+  const hasTasks =
+    view.totalCount > 0;
+
+  const hasVisibleTasks =
+    view.visibleCount > 0;
+
+  elements.emptyState.hidden =
+    hasTasks;
+
+  elements.noResults.hidden =
+    !hasTasks || hasVisibleTasks;
+
+  elements.tableContainer.hidden =
+    !hasVisibleTasks;
+
+  if (hasVisibleTasks) {
+    renderTaskRows(
+      database,
+      queue,
+      view.tasks,
+      elements.taskBody
+    );
+  }
+
+  return section;
+}
+
+function renderQueues(database) {
+  renderDom.queuesContainer.replaceChildren();
+
+  const fragment = document.createDocumentFragment();
+
+  for (const queue of database.queues) {
+    fragment.append(
+      renderQueueSection(database, queue)
+    );
+  }
+
+  renderDom.queuesContainer.append(fragment);
+}
+
+function findRenderedQueueSection(queueId) {
+  if (!isNonEmptyString(queueId)) {
+    return null;
+  }
+
+  const sections =
+    renderDom.queuesContainer.querySelectorAll(
+      '[data-role="queue-section"]'
+    );
+
+  for (const section of sections) {
+    if (section.dataset.queueId === queueId) {
+      return section;
+    }
+  }
+
+  return null;
+}
+
+function focusQueueApply(queueId) {
+  const section =
+    findRenderedQueueSection(queueId);
+
+  if (section === null) {
+    return false;
+  }
+
+  return focusElementSafely(
+    section.querySelector(
+      '[data-action="apply-queue-view"]'
+    )
+  );
+}
+
+function rerenderQueueSection(
+  queueId,
+  restoreApplyFocus = false
+) {
+  const database =
+    requireOpenDatabase();
+
+  const queue = requireQueue(
+    database,
+    queueId
+  );
+
+  const currentSection =
+    findRenderedQueueSection(queueId);
+
+  if (currentSection === null) {
+    throw new Error(
+      `Queue "${queueId}" is not currently rendered.`
+    );
+  }
+
+  const newSection =
+    renderQueueSection(
+      database,
+      queue
+    );
+
+  currentSection.replaceWith(
+    newSection
+  );
+
+  if (restoreApplyFocus) {
+    focusElementSafely(
+      requireRenderElement(
+        '[data-action="apply-queue-view"]',
+        newSection
+      )
+    );
+  }
+
+  return newSection;
+}
+
+function clearRenderedWorkspace() {
+  clearRenderedStatistics();
+  renderDom.queuesContainer.replaceChildren();
+}
+
+function renderApp() {
+  const database = getDatabase();
+
+  renderApplicationState(database);
+
+  if (database === null) {
+    clearRenderedWorkspace();
+    return;
+  }
+
+  renderStatistics(database);
+  renderQueues(database);
+}
+
+// ============================================================
+// Dialog state / infrastructure
+// ============================================================
+
+const dialogRuntime = {
+  contexts: new WeakMap(),
+  lifecycleBound: new WeakSet()
+};
+
+function requireDialogElement(dialog) {
+  if (!(dialog instanceof HTMLDialogElement)) {
+    throw new TypeError("A valid dialog element is required.");
+  }
+
+  return dialog;
+}
+
+function getOpenStmDialog() {
+  return document.querySelector("dialog[data-dialog][open]");
+}
+
+function canOpenStmDialog(dialog) {
+  requireDialogElement(dialog);
+
+  const openDialog = getOpenStmDialog();
+
+  return (
+    openDialog === null &&
+    !dialog.open &&
+    !dialogRuntime.contexts.has(dialog)
+  );
+}
+
+function isUsableFocusTarget(element) {
+  return (
+    element instanceof HTMLElement &&
+    element.isConnected &&
+    !element.hidden &&
+    !element.hasAttribute("disabled") &&
+    element.closest("[hidden]") === null
+  );
+}
+
+function focusElementSafely(element) {
+  if (!isUsableFocusTarget(element)) {
+    return false;
+  }
+
+  element.focus({ preventScroll: true });
+  return document.activeElement === element;
+}
+
+function resolveDialogOpener(opener) {
+  if (opener instanceof HTMLElement) {
+    return opener;
+  }
+
+  return document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+}
+
+function focusInitialDialogControl(dialog, preferredControl) {
+  if (
+    preferredControl instanceof HTMLElement &&
+    dialog.contains(preferredControl) &&
+    focusElementSafely(preferredControl)
+  ) {
+    return true;
+  }
+
+  const fallbackControls = dialog.querySelectorAll(
+    "input:not([disabled]), select:not([disabled]), " +
+    "textarea:not([disabled]), button:not([disabled])"
+  );
+
+  for (const control of fallbackControls) {
+    if (focusElementSafely(control)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function finalizeStmDialogClose(dialog) {
+  const context = dialogRuntime.contexts.get(dialog);
+
+  if (context === undefined) {
+    return;
+  }
+
+  dialogRuntime.contexts.delete(dialog);
+
+  try {
+    context.cleanup();
+  } finally {
+    if (getOpenStmDialog() === null) {
+      focusElementSafely(context.opener);
+    }
+  }
+}
+
+function handleStmDialogCancel(event) {
+  event.preventDefault();
+  closeStmDialog(event.currentTarget);
+}
+
+function handleStmDialogClose(event) {
+  finalizeStmDialogClose(event.currentTarget);
+}
+
+function ensureStmDialogLifecycle(dialog) {
+  requireDialogElement(dialog);
+
+  if (dialogRuntime.lifecycleBound.has(dialog)) {
+    return;
+  }
+
+  dialog.addEventListener("cancel", handleStmDialogCancel);
+  dialog.addEventListener("close", handleStmDialogClose);
+  dialogRuntime.lifecycleBound.add(dialog);
+}
+
+function openStmDialog(
+  dialog,
+  opener,
+  initialFocus,
+  cleanup
+) {
+  requireDialogElement(dialog);
+
+  if (typeof cleanup !== "function") {
+    throw new TypeError("Dialog cleanup must be a function.");
+  }
+
+  if (!canOpenStmDialog(dialog)) {
+    return false;
+  }
+
+  ensureStmDialogLifecycle(dialog);
+
+  const context = {
+    opener: resolveDialogOpener(opener),
+    cleanup
+  };
+
+  dialogRuntime.contexts.set(dialog, context);
+
+  try {
+    dialog.showModal();
+  } catch (error) {
+    dialogRuntime.contexts.delete(dialog);
+    cleanup();
+    throw error;
+  }
+
+  focusInitialDialogControl(dialog, initialFocus);
+  return true;
+}
+
+function closeStmDialog(dialog) {
+  requireDialogElement(dialog);
+
+  if (!dialog.open) {
+    finalizeStmDialogClose(dialog);
+    return false;
+  }
+
+  dialog.close();
+  finalizeStmDialogClose(dialog);
+  return true;
+}
+
+function cancelStmDialogFromControl(control) {
+  if (!(control instanceof HTMLElement)) {
+    throw new TypeError("A valid dialog control is required.");
+  }
+
+  const dialog = control.closest("dialog[data-dialog]");
+
+  if (dialog === null) {
+    throw new Error("Dialog control is not inside an STM dialog.");
+  }
+
+  return closeStmDialog(dialog);
+}
+
+// ============================================================
+// Dialog DOM references
+// ============================================================
+
+const stage5Dom = (() => {
+  const manageStepsDialog = requireRenderElement(
+    "#manage-steps-dialog"
+  );
+  const manageQueuesDialog = requireRenderElement(
+    "#manage-queues-dialog"
+  );
+
+  return Object.freeze({
+    manageStepsDialog,
+    workflowStepList: requireRenderElement(
+      '[data-role="workflow-step-list"]',
+      manageStepsDialog
+    ),
+    newStepName: requireRenderElement(
+      "#new-step-name",
+      manageStepsDialog
+    ),
+    newStepError: requireRenderElement(
+      "#new-step-error",
+      manageStepsDialog
+    ),
+    workflowStepTemplate: requireRenderElement(
+      "#workflow-step-template"
+    ),
+
+    manageQueuesDialog,
+    queueList: requireRenderElement(
+      '[data-role="queue-list"]',
+      manageQueuesDialog
+    ),
+    newQueueName: requireRenderElement(
+      "#new-queue-name",
+      manageQueuesDialog
+    ),
+    newQueueError: requireRenderElement(
+      "#new-queue-error",
+      manageQueuesDialog
+    ),
+    addQueueButton: requireRenderElement(
+      '[data-action="add-queue"]',
+      manageQueuesDialog
+    ),
+    queueManagerItemTemplate: requireRenderElement(
+      "#queue-manager-item-template"
+    )
+  });
+})();
+
+// ============================================================
+// Form error helpers
+// ============================================================
+
+function clearFieldError(errorElement, control = null) {
+  errorElement.textContent = "";
+  errorElement.hidden = true;
+
+  if (control instanceof HTMLElement) {
+    control.removeAttribute("aria-invalid");
+  }
+}
+
+function showFieldError(errorElement, message, control = null) {
+  errorElement.textContent = message;
+  errorElement.hidden = false;
+
+  if (control instanceof HTMLElement) {
+    control.setAttribute("aria-invalid", "true");
+  }
+}
+
+function getErrorMessage(error, fallbackMessage) {
+  if (
+    error instanceof Error &&
+    typeof error.message === "string" &&
+    error.message.trim().length > 0
+  ) {
+    return error.message;
+  }
+
+  return fallbackMessage;
+}
+
+function findDraftControl(list, role, draftId) {
+  const controls = list.querySelectorAll(`[data-role="${role}"]`);
+
+  for (const control of controls) {
+    if (control.dataset.draftId === draftId) {
+      return control;
+    }
+  }
+
+  return null;
+}
+
+function findDraftError(list, role, draftId) {
+  const errors = list.querySelectorAll(`[data-role="${role}"]`);
+
+  for (const errorElement of errors) {
+    if (errorElement.dataset.draftId === draftId) {
+      return errorElement;
+    }
+  }
+
+  return null;
+}
+
+function clearDraftRowErrors(list, inputRole, errorRole) {
+  const inputs = list.querySelectorAll(`[data-role="${inputRole}"]`);
+  const errors = list.querySelectorAll(`[data-role="${errorRole}"]`);
+
+  for (const input of inputs) {
+    input.removeAttribute("aria-invalid");
+  }
+
+  for (const errorElement of errors) {
+    clearFieldError(errorElement);
+  }
+}
+
+// ============================================================
+// Dialog transaction helpers
+// ============================================================
+
+function cloneDatabaseForTransaction(database) {
+  return JSON.parse(JSON.stringify(database));
+}
+
+function createDialogTransactionSnapshot() {
+  const database = requireOpenDatabase();
+
+  return {
+    database:
+      cloneDatabaseForTransaction(database),
+    isDirty: appState.isDirty,
+    queueViews: new Map(
+      appState.queueViews
+    )
+  };
+}
+
+function restoreDialogTransactionSnapshot(
+  snapshot
+) {
+  appState.database =
+    snapshot.database;
+
+  appState.isDirty =
+    snapshot.isDirty;
+
+  appState.queueViews = new Map(
+    snapshot.queueViews
+  );
+}
+
+function runDialogTransaction(operation) {
+  if (typeof operation !== "function") {
+    throw new TypeError("Transaction operation must be a function.");
+  }
+
+  const snapshot = createDialogTransactionSnapshot();
+
+  try {
+    const result = operation();
+    validateDatabase(requireOpenDatabase());
+    return result;
+  } catch (error) {
+    restoreDialogTransactionSnapshot(snapshot);
+    throw error;
+  }
+}
+
+function runDraftDomainOperation(draftId, operation) {
+  try {
+    return operation();
+  } catch (error) {
+    const wrappedError = new Error(
+      getErrorMessage(error, "The operation could not be completed.")
+    );
+
+    wrappedError.dialogDraftId = draftId;
+    wrappedError.cause = error;
+    throw wrappedError;
+  }
+}
+
+// ============================================================
+// Manage Steps controller
+// ============================================================
+
+const manageStepsState = {
+  draft: null,
+  nextDraftId: 1
+};
+
+function clearManageStepsDraft() {
+  manageStepsState.draft = null;
+  manageStepsState.nextDraftId = 1;
+  stage5Dom.workflowStepList.replaceChildren();
+  stage5Dom.newStepName.value = "";
+  clearFieldError(
+    stage5Dom.newStepError,
+    stage5Dom.newStepName
+  );
+}
+
+function createManageStepsDraft(database) {
+  manageStepsState.nextDraftId = 1;
+
+  return database.workflow.map(step => ({
+    draftId: `workflow-draft-${manageStepsState.nextDraftId++}`,
+    databaseId: step.id,
+    isExisting: true,
+    name: step.name
+  }));
+}
+
+function requireManageStepsDraft() {
+  if (!Array.isArray(manageStepsState.draft)) {
+    throw new Error("Manage Steps dialog is not initialized.");
+  }
+
+  return manageStepsState.draft;
+}
+
+function findManageStepDraftEntry(draftId) {
+  return requireManageStepsDraft().find(
+    entry => entry.draftId === draftId
+  ) || null;
+}
+
+function createManageStepDraftItem(entry, index) {
+  const item = cloneRenderTemplate(
+    stage5Dom.workflowStepTemplate,
+    "workflow-step-template"
+  );
+  const label = requireRenderElement(
+    '[data-role="workflow-step-label"]',
+    item
+  );
+  const input = requireRenderElement(
+    '[data-role="workflow-step-name"]',
+    item
+  );
+  const errorElement = requireRenderElement(
+    '[data-role="workflow-step-error"]',
+    item
+  );
+  const inputId = `manage-step-name-${entry.draftId}`;
+  const errorId = `manage-step-error-${entry.draftId}`;
+
+  item.dataset.draftId = entry.draftId;
+  input.dataset.draftId = entry.draftId;
+  errorElement.dataset.draftId = entry.draftId;
+
+  input.id = inputId;
+  input.value = entry.name;
+  input.setAttribute("aria-describedby", errorId);
+
+  label.htmlFor = inputId;
+  label.textContent = `Step ${index + 1} name`;
+
+  errorElement.id = errorId;
+  clearFieldError(errorElement, input);
+
+  return item;
+}
+
+function renderManageStepsDraft() {
+  const fragment = document.createDocumentFragment();
+
+  requireManageStepsDraft().forEach((entry, index) => {
+    fragment.append(
+      createManageStepDraftItem(entry, index)
+    );
+  });
+
+  stage5Dom.workflowStepList.replaceChildren(fragment);
+}
+
+function syncManageStepsDraftFromDom() {
+  const draft = requireManageStepsDraft();
+  const inputs = stage5Dom.workflowStepList.querySelectorAll(
+    '[data-role="workflow-step-name"]'
+  );
+  const seenDraftIds = new Set();
+
+  for (const input of inputs) {
+    const draftId = input.dataset.draftId;
+    const entry = findManageStepDraftEntry(draftId);
+
+    if (entry === null || seenDraftIds.has(draftId)) {
+      throw new Error("Workflow draft UI is out of sync.");
+    }
+
+    seenDraftIds.add(draftId);
+    entry.name = input.value;
+  }
+
+  if (seenDraftIds.size !== draft.length) {
+    throw new Error("Workflow draft UI is out of sync.");
+  }
+}
+
+function validateManageStepsDraft() {
+  const draft = requireManageStepsDraft();
+  const normalizedNames = new Map();
+  let firstInvalidInput = null;
+
+  clearDraftRowErrors(
+    stage5Dom.workflowStepList,
+    "workflow-step-name",
+    "workflow-step-error"
+  );
+
+  for (const entry of draft) {
+    const normalizedName = normalizeUserText(entry.name);
+    const input = findDraftControl(
+      stage5Dom.workflowStepList,
+      "workflow-step-name",
+      entry.draftId
+    );
+    const errorElement = findDraftError(
+      stage5Dom.workflowStepList,
+      "workflow-step-error",
+      entry.draftId
+    );
+
+    if (input === null || errorElement === null) {
+      throw new Error("Workflow draft field is missing.");
+    }
+
+    normalizedNames.set(entry.draftId, normalizedName);
+
+    if (normalizedName.length === 0) {
+      showFieldError(
+        errorElement,
+        "Workflow step name must not be empty.",
+        input
+      );
+
+      if (firstInvalidInput === null) {
+        firstInvalidInput = input;
+      }
+    }
+  }
+
+  return {
+    isValid: firstInvalidInput === null,
+    normalizedNames,
+    firstInvalidInput
+  };
+}
+
+function applyNormalizedStepNames(normalizedNames) {
+  for (const entry of requireManageStepsDraft()) {
+    entry.name = normalizedNames.get(entry.draftId);
+  }
+}
+
+function applyManageStepsDraft() {
+  const database = requireOpenDatabase();
+  const draft = requireManageStepsDraft();
+
+  for (const entry of draft) {
+    if (!entry.isExisting) {
+      continue;
+    }
+
+    const step = requireWorkflowStep(database, entry.databaseId);
+
+    if (step.name === entry.name) {
+      continue;
+    }
+
+    runDraftDomainOperation(
+      entry.draftId,
+      () => renameWorkflowStep(entry.databaseId, entry.name)
+    );
+  }
+
+  for (const entry of draft) {
+    if (entry.isExisting) {
+      continue;
+    }
+
+    runDraftDomainOperation(
+      entry.draftId,
+      () => addWorkflowStep(entry.name)
+    );
+  }
+}
+
+function showManageStepsSaveError(error) {
+  const draftId = error && error.dialogDraftId;
+  const message = getErrorMessage(
+    error,
+    "Could not save workflow changes. No changes were applied."
+  );
+
+  if (typeof draftId === "string") {
+    const input = findDraftControl(
+      stage5Dom.workflowStepList,
+      "workflow-step-name",
+      draftId
+    );
+    const errorElement = findDraftError(
+      stage5Dom.workflowStepList,
+      "workflow-step-error",
+      draftId
+    );
+
+    if (input !== null && errorElement !== null) {
+      showFieldError(errorElement, message, input);
+      focusElementSafely(input);
+      return;
+    }
+  }
+
+  showFieldError(
+    stage5Dom.newStepError,
+    "Could not save workflow changes. No changes were applied.",
+    stage5Dom.newStepName
+  );
+  focusElementSafely(stage5Dom.newStepName);
+}
+
+function openManageStepsDialog(opener = null) {
+  if (!canOpenStmDialog(stage5Dom.manageStepsDialog)) {
+    return false;
+  }
+
+  const database = requireOpenDatabase();
+
+  manageStepsState.draft = createManageStepsDraft(database);
+  stage5Dom.newStepName.value = "";
+  clearFieldError(
+    stage5Dom.newStepError,
+    stage5Dom.newStepName
+  );
+  renderManageStepsDraft();
+
+  const initialFocus =
+    stage5Dom.workflowStepList.querySelector(
+      '[data-role="workflow-step-name"]'
+    ) || stage5Dom.newStepName;
+
+  return openStmDialog(
+    stage5Dom.manageStepsDialog,
+    opener,
+    initialFocus,
+    clearManageStepsDraft
+  );
+}
+
+function addManageStepDraft() {
+  const normalizedName = normalizeUserText(
+    stage5Dom.newStepName.value
+  );
+
+  clearFieldError(
+    stage5Dom.newStepError,
+    stage5Dom.newStepName
+  );
+
+  if (normalizedName.length === 0) {
+    showFieldError(
+      stage5Dom.newStepError,
+      "Workflow step name must not be empty.",
+      stage5Dom.newStepName
+    );
+    focusElementSafely(stage5Dom.newStepName);
+    return false;
+  }
+
+  syncManageStepsDraftFromDom();
+
+  requireManageStepsDraft().push({
+    draftId: `workflow-draft-${manageStepsState.nextDraftId++}`,
+    databaseId: null,
+    isExisting: false,
+    name: normalizedName
+  });
+
+  stage5Dom.newStepName.value = "";
+  renderManageStepsDraft();
+  focusElementSafely(stage5Dom.newStepName);
+  return true;
+}
+
+function saveManageSteps() {
+  syncManageStepsDraftFromDom();
+  clearFieldError(
+    stage5Dom.newStepError,
+    stage5Dom.newStepName
+  );
+
+  const validation = validateManageStepsDraft();
+
+  if (!validation.isValid) {
+    focusElementSafely(validation.firstInvalidInput);
+    return false;
+  }
+
+  applyNormalizedStepNames(validation.normalizedNames);
+
+  try {
+    runDialogTransaction(applyManageStepsDraft);
+  } catch (error) {
+    showManageStepsSaveError(error);
+    return false;
+  }
+
+  renderApp();
+  closeStmDialog(stage5Dom.manageStepsDialog);
+  return true;
+}
+
+function cancelManageStepsDialog() {
+  return closeStmDialog(stage5Dom.manageStepsDialog);
+}
+
+// ============================================================
+// Manage Queues controller
+// ============================================================
+
+const manageQueuesState = {
+  draft: null,
+  originalQueueIds: null,
+  nextDraftId: 1
+};
+
+function clearManageQueuesDraft() {
+  manageQueuesState.draft = null;
+  manageQueuesState.originalQueueIds = null;
+  manageQueuesState.nextDraftId = 1;
+  stage5Dom.queueList.replaceChildren();
+  stage5Dom.newQueueName.value = "";
+  stage5Dom.addQueueButton.disabled = false;
+  clearFieldError(
+    stage5Dom.newQueueError,
+    stage5Dom.newQueueName
+  );
+}
+
+function createManageQueuesDraft(database) {
+  manageQueuesState.nextDraftId = 1;
+
+  return database.queues.map(queue => ({
+    draftId: `queue-draft-${manageQueuesState.nextDraftId++}`,
+    databaseId: queue.id,
+    isExisting: true,
+    name: queue.name
+  }));
+}
+
+function requireManageQueuesDraft() {
+  if (!Array.isArray(manageQueuesState.draft)) {
+    throw new Error("Manage Queues dialog is not initialized.");
+  }
+
+  return manageQueuesState.draft;
+}
+
+function findManageQueueDraftEntry(draftId) {
+  return requireManageQueuesDraft().find(
+    entry => entry.draftId === draftId
+  ) || null;
+}
+
+function createManageQueueDraftItem(entry, index) {
+  const item = cloneRenderTemplate(
+    stage5Dom.queueManagerItemTemplate,
+    "queue-manager-item-template"
+  );
+  const label = requireRenderElement(
+    '[data-role="queue-name-label"]',
+    item
+  );
+  const input = requireRenderElement(
+    '[data-role="queue-name-input"]',
+    item
+  );
+  const errorElement = requireRenderElement(
+    '[data-role="queue-name-error"]',
+    item
+  );
+  const warning = requireRenderElement(
+    ".warning-text",
+    item
+  );
+  const deleteButton = requireRenderElement(
+    '[data-action="delete-queue"]',
+    item
+  );
+  const inputId = `manage-queue-name-${entry.draftId}`;
+  const errorId = `manage-queue-error-${entry.draftId}`;
+
+  item.dataset.draftId = entry.draftId;
+  input.dataset.draftId = entry.draftId;
+  errorElement.dataset.draftId = entry.draftId;
+  deleteButton.dataset.draftId = entry.draftId;
+
+  input.id = inputId;
+  input.value = entry.name;
+  input.setAttribute("aria-describedby", errorId);
+
+  label.htmlFor = inputId;
+  label.textContent = `Queue ${index + 1} name`;
+
+  errorElement.id = errorId;
+  clearFieldError(errorElement, input);
+
+  warning.hidden = !entry.isExisting;
+  deleteButton.textContent = `Delete queue ${index + 1}`;
+
+  return item;
+}
+
+function renderManageQueuesDraft() {
+  const fragment = document.createDocumentFragment();
+
+  requireManageQueuesDraft().forEach((entry, index) => {
+    fragment.append(
+      createManageQueueDraftItem(entry, index)
+    );
+  });
+
+  stage5Dom.queueList.replaceChildren(fragment);
+}
+
+function syncManageQueuesDraftFromDom() {
+  const draft = requireManageQueuesDraft();
+  const inputs = stage5Dom.queueList.querySelectorAll(
+    '[data-role="queue-name-input"]'
+  );
+  const seenDraftIds = new Set();
+
+  for (const input of inputs) {
+    const draftId = input.dataset.draftId;
+    const entry = findManageQueueDraftEntry(draftId);
+
+    if (entry === null || seenDraftIds.has(draftId)) {
+      throw new Error("Queue draft UI is out of sync.");
+    }
+
+    seenDraftIds.add(draftId);
+    entry.name = input.value;
+  }
+
+  if (seenDraftIds.size !== draft.length) {
+    throw new Error("Queue draft UI is out of sync.");
+  }
+}
+
+function isManageQueueNameTakenInForm(normalizedName) {
+  const inputs = stage5Dom.queueList.querySelectorAll(
+    '[data-role="queue-name-input"]'
+  );
+
+  return Array.from(inputs).some(
+    input => normalizeUserText(input.value) === normalizedName
+  );
+}
+
+function setQueueDraftRowError(draftId, message) {
+  const input = findDraftControl(
+    stage5Dom.queueList,
+    "queue-name-input",
+    draftId
+  );
+  const errorElement = findDraftError(
+    stage5Dom.queueList,
+    "queue-name-error",
+    draftId
+  );
+
+  if (input === null || errorElement === null) {
+    return null;
+  }
+
+  showFieldError(errorElement, message, input);
+  return input;
+}
+
+function collectQueueDraftValidationData(draft) {
+  const normalizedNames = new Map();
+  const entriesByName = new Map();
+  const errorsByDraftId = new Map();
+
+  for (const entry of draft) {
+    const normalizedName = normalizeUserText(entry.name);
+    normalizedNames.set(entry.draftId, normalizedName);
+
+    if (normalizedName.length === 0) {
+      errorsByDraftId.set(
+        entry.draftId,
+        "Queue name must not be empty."
+      );
+      continue;
+    }
+
+    const matchingEntries = entriesByName.get(normalizedName) || [];
+    matchingEntries.push(entry);
+    entriesByName.set(normalizedName, matchingEntries);
+  }
+
+  return { normalizedNames, entriesByName, errorsByDraftId };
+}
+
+function addDuplicateQueueDraftErrors(
+  entriesByName,
+  errorsByDraftId
+) {
+  for (const matchingEntries of entriesByName.values()) {
+    if (matchingEntries.length < 2) {
+      continue;
+    }
+
+    for (const entry of matchingEntries) {
+      errorsByDraftId.set(
+        entry.draftId,
+        "Queue names must be unique."
+      );
+    }
+  }
+}
+
+function addQueueWorkflowRequirementErrors(
+  database,
+  draft,
+  errorsByDraftId
+) {
+  if (database.workflow.length > 0) {
+    return;
+  }
+
+  for (const entry of draft) {
+    if (
+      !entry.isExisting &&
+      !errorsByDraftId.has(entry.draftId)
+    ) {
+      errorsByDraftId.set(
+        entry.draftId,
+        "A workflow step is required before creating a queue."
+      );
+    }
+  }
+}
+
+function showQueueDraftValidationErrors(
+  draft,
+  errorsByDraftId
+) {
+  let firstInvalidInput = null;
+
+  for (const entry of draft) {
+    const message = errorsByDraftId.get(entry.draftId);
+
+    if (message === undefined) {
+      continue;
+    }
+
+    const input = setQueueDraftRowError(entry.draftId, message);
+
+    if (input === null) {
+      throw new Error("Queue draft field is missing.");
+    }
+
+    if (firstInvalidInput === null) {
+      firstInvalidInput = input;
+    }
+  }
+
+  return firstInvalidInput;
+}
+
+function validateManageQueuesDraft() {
+  const database = requireOpenDatabase();
+  const draft = requireManageQueuesDraft();
+  const validation = collectQueueDraftValidationData(draft);
+
+  clearDraftRowErrors(
+    stage5Dom.queueList,
+    "queue-name-input",
+    "queue-name-error"
+  );
+
+  addDuplicateQueueDraftErrors(
+    validation.entriesByName,
+    validation.errorsByDraftId
+  );
+  addQueueWorkflowRequirementErrors(
+    database,
+    draft,
+    validation.errorsByDraftId
+  );
+
+  const firstInvalidInput = showQueueDraftValidationErrors(
+    draft,
+    validation.errorsByDraftId
+  );
+
+  return {
+    isValid: validation.errorsByDraftId.size === 0,
+    normalizedNames: validation.normalizedNames,
+    firstInvalidInput
+  };
+}
+
+function applyNormalizedQueueNames(normalizedNames) {
+  for (const entry of requireManageQueuesDraft()) {
+    entry.name = normalizedNames.get(entry.draftId);
+  }
+}
+
+function generateTemporaryQueueName(database, reservedNames) {
+  let temporaryName;
+
+  do {
+    temporaryName = `__stm_internal_${generateUid("queue-temp")}`;
+  } while (
+    reservedNames.has(temporaryName) ||
+    isQueueNameTaken(database, temporaryName)
+  );
+
+  reservedNames.add(temporaryName);
+  return temporaryName;
+}
+
+function getDeletedManageQueueIds() {
+  const draft = requireManageQueuesDraft();
+  const finalExistingIds = new Set(
+    draft
+      .filter(entry => entry.isExisting)
+      .map(entry => entry.databaseId)
+  );
+
+  return manageQueuesState.originalQueueIds.filter(
+    queueId => !finalExistingIds.has(queueId)
+  );
+}
+
+function deleteRemovedManageQueues() {
+  for (const queueId of getDeletedManageQueueIds()) {
+    deleteQueue(queueId);
+  }
+}
+
+function getChangedExistingQueueDraftEntries(database, draft) {
+  return draft.filter(entry => {
+    if (!entry.isExisting) {
+      return false;
+    }
+
+    const queue = requireQueue(database, entry.databaseId);
+    return queue.name !== entry.name;
+  });
+}
+
+function temporarilyRenameManageQueues(database, entries, draft) {
+  const reservedNames = new Set([
+    ...database.queues.map(queue => queue.name.trim()),
+    ...draft.map(entry => entry.name)
+  ]);
+
+  for (const entry of entries) {
+    const temporaryName = generateTemporaryQueueName(
+      database,
+      reservedNames
+    );
+
+    runDraftDomainOperation(
+      entry.draftId,
+      () => renameQueue(entry.databaseId, temporaryName)
+    );
+  }
+}
+
+function applyFinalManageQueueNames(entries) {
+  for (const entry of entries) {
+    runDraftDomainOperation(
+      entry.draftId,
+      () => renameQueue(entry.databaseId, entry.name)
+    );
+  }
+}
+
+function createNewManageQueues(draft) {
+  for (const entry of draft) {
+    if (entry.isExisting) {
+      continue;
+    }
+
+    runDraftDomainOperation(
+      entry.draftId,
+      () => createQueue(entry.name)
+    );
+  }
+}
+
+function applyManageQueuesDraft() {
+  const database = requireOpenDatabase();
+  const draft = requireManageQueuesDraft();
+
+  deleteRemovedManageQueues();
+
+  const changedEntries = getChangedExistingQueueDraftEntries(
+    database,
+    draft
+  );
+
+  temporarilyRenameManageQueues(
+    database,
+    changedEntries,
+    draft
+  );
+  applyFinalManageQueueNames(changedEntries);
+  createNewManageQueues(draft);
+}
+
+function showManageQueuesSaveError(error) {
+  const draftId = error && error.dialogDraftId;
+  const message = getErrorMessage(
+    error,
+    "Could not save queue changes. No changes were applied."
+  );
+
+  if (typeof draftId === "string") {
+    const input = setQueueDraftRowError(
+      draftId,
+      message
+    );
+
+    if (input !== null) {
+      focusElementSafely(input);
+      return;
+    }
+  }
+
+  showFieldError(
+    stage5Dom.newQueueError,
+    "Could not save queue changes. No changes were applied.",
+    stage5Dom.newQueueName
+  );
+  focusElementSafely(stage5Dom.newQueueName);
+}
+
+function openManageQueuesDialog(opener = null) {
+  if (!canOpenStmDialog(stage5Dom.manageQueuesDialog)) {
+    return false;
+  }
+
+  const database = requireOpenDatabase();
+
+  manageQueuesState.draft = createManageQueuesDraft(database);
+  manageQueuesState.originalQueueIds = database.queues.map(
+    queue => queue.id
+  );
+
+  stage5Dom.newQueueName.value = "";
+  stage5Dom.addQueueButton.disabled = database.workflow.length === 0;
+  clearFieldError(
+    stage5Dom.newQueueError,
+    stage5Dom.newQueueName
+  );
+  renderManageQueuesDraft();
+
+  const initialFocus =
+    stage5Dom.queueList.querySelector(
+      '[data-role="queue-name-input"]'
+    ) || stage5Dom.newQueueName;
+
+  return openStmDialog(
+    stage5Dom.manageQueuesDialog,
+    opener,
+    initialFocus,
+    clearManageQueuesDraft
+  );
+}
+
+function addManageQueueDraft() {
+  const database = requireOpenDatabase();
+
+  clearFieldError(
+    stage5Dom.newQueueError,
+    stage5Dom.newQueueName
+  );
+
+  if (database.workflow.length === 0) {
+    showFieldError(
+      stage5Dom.newQueueError,
+      "A workflow step is required before creating a queue.",
+      stage5Dom.newQueueName
+    );
+    focusElementSafely(stage5Dom.newQueueName);
+    return false;
+  }
+
+  const normalizedName = normalizeUserText(
+    stage5Dom.newQueueName.value
+  );
+
+  if (normalizedName.length === 0) {
+    showFieldError(
+      stage5Dom.newQueueError,
+      "Queue name must not be empty.",
+      stage5Dom.newQueueName
+    );
+    focusElementSafely(stage5Dom.newQueueName);
+    return false;
+  }
+
+  if (isManageQueueNameTakenInForm(normalizedName)) {
+    showFieldError(
+      stage5Dom.newQueueError,
+      `Queue name "${normalizedName}" already exists.`,
+      stage5Dom.newQueueName
+    );
+    focusElementSafely(stage5Dom.newQueueName);
+    return false;
+  }
+
+  syncManageQueuesDraftFromDom();
+
+  requireManageQueuesDraft().push({
+    draftId: `queue-draft-${manageQueuesState.nextDraftId++}`,
+    databaseId: null,
+    isExisting: false,
+    name: normalizedName
+  });
+
+  stage5Dom.newQueueName.value = "";
+  renderManageQueuesDraft();
+  focusElementSafely(stage5Dom.newQueueName);
+  return true;
+}
+
+function deleteManageQueueDraft(draftId) {
+  const draft = requireManageQueuesDraft();
+  const entryIndex = draft.findIndex(
+    entry => entry.draftId === draftId
+  );
+
+  if (entryIndex === -1) {
+    throw new Error("Unknown queue draft entry.");
+  }
+
+  const entry = draft[entryIndex];
+
+  if (
+    entry.isExisting &&
+    !window.confirm(
+      "This will permanently delete the queue and all tasks in it. " +
+      "This action cannot be undone."
+    )
+  ) {
+    return false;
+  }
+
+  syncManageQueuesDraftFromDom();
+  draft.splice(entryIndex, 1);
+  renderManageQueuesDraft();
+
+  const remainingInputs = stage5Dom.queueList.querySelectorAll(
+    '[data-role="queue-name-input"]'
+  );
+  const focusTarget =
+    remainingInputs[entryIndex] ||
+    remainingInputs[remainingInputs.length - 1] ||
+    stage5Dom.newQueueName;
+
+  focusElementSafely(focusTarget);
+  return true;
+}
+
+function deleteManageQueueDraftFromControl(control) {
+  if (!(control instanceof HTMLElement)) {
+    throw new TypeError("A valid Delete control is required.");
+  }
+
+  const draftId = control.dataset.draftId;
+
+  if (!isNonEmptyString(draftId)) {
+    throw new Error("Delete control has no queue draft identifier.");
+  }
+
+  return deleteManageQueueDraft(draftId);
+}
+
+function saveManageQueues() {
+  syncManageQueuesDraftFromDom();
+  clearFieldError(
+    stage5Dom.newQueueError,
+    stage5Dom.newQueueName
+  );
+
+  const validation = validateManageQueuesDraft();
+
+  if (!validation.isValid) {
+    focusElementSafely(validation.firstInvalidInput);
+    return false;
+  }
+
+  applyNormalizedQueueNames(validation.normalizedNames);
+
+  try {
+    runDialogTransaction(applyManageQueuesDraft);
+  } catch (error) {
+    showManageQueuesSaveError(error);
+    return false;
+  }
+
+  renderApp();
+  closeStmDialog(stage5Dom.manageQueuesDialog);
+  return true;
+}
+
+function cancelManageQueuesDialog() {
+  return closeStmDialog(stage5Dom.manageQueuesDialog);
+}
+
+// ============================================================
+// Task dialog DOM references
+// ============================================================
+
+const stage6Dom = (() => {
+  const addTasksDialog = requireRenderElement(
+    "#add-tasks-dialog"
+  );
+  const editTaskDialog = requireRenderElement(
+    "#edit-task-dialog"
+  );
+
+  return Object.freeze({
+    addTasksDialog,
+    addTasksForm: requireRenderElement(
+      "#add-tasks-form",
+      addTasksDialog
+    ),
+    addTasksQueue: requireRenderElement(
+      "#add-tasks-queue",
+      addTasksDialog
+    ),
+    addTasksText: requireRenderElement(
+      "#add-tasks-text",
+      addTasksDialog
+    ),
+    addTasksQueueError: requireRenderElement(
+      "#add-tasks-queue-error",
+      addTasksDialog
+    ),
+    addTasksTextError: requireRenderElement(
+      "#add-tasks-text-error",
+      addTasksDialog
+    ),
+
+    editTaskDialog,
+    editTaskForm: requireRenderElement(
+      "#edit-task-form",
+      editTaskDialog
+    ),
+    editTaskId: requireRenderElement(
+      '[data-role="edit-task-id"]',
+      editTaskDialog
+    ),
+    editTaskStep: requireRenderElement(
+      '[data-role="edit-task-step"]',
+      editTaskDialog
+    ),
+    editTaskText: requireRenderElement(
+      "#edit-task-text",
+      editTaskDialog
+    ),
+    editTaskTextError: requireRenderElement(
+      "#edit-task-text-error",
+      editTaskDialog
+    ),
+    editTaskNextStepButton: requireRenderElement(
+      '[data-action="edit-task-next-step"]',
+      editTaskDialog
+    ),
+    taskJournal: requireRenderElement(
+      '[data-role="task-journal"]',
+      editTaskDialog
+    ),
+    taskJournalEntryTemplate: requireRenderElement(
+      "#task-journal-entry-template"
+    )
+  });
+})();
+
+// ============================================================
+// Add Tasks controller
+// ============================================================
+
+function clearAddTasksDialog() {
+  stage6Dom.addTasksQueue.replaceChildren();
+  stage6Dom.addTasksText.value = "";
+
+  clearFieldError(
+    stage6Dom.addTasksQueueError,
+    stage6Dom.addTasksQueue
+  );
+  clearFieldError(
+    stage6Dom.addTasksTextError,
+    stage6Dom.addTasksText
+  );
+}
+
+function renderAddTasksQueueOptions(database) {
+  const fragment = document.createDocumentFragment();
+
+  for (const queue of database.queues) {
+    const option = document.createElement("option");
+
+    option.value = queue.id;
+    option.textContent = queue.name;
+    fragment.append(option);
+  }
+
+  stage6Dom.addTasksQueue.replaceChildren(fragment);
+  stage6Dom.addTasksQueue.selectedIndex = 0;
+}
+
+function parseAddTaskTexts(value) {
+  return value
+    .split(/\r\n|\r|\n/)
+    .map(line => normalizeUserText(line))
+    .filter(line => line.length > 0);
+}
+
+function validateAddTasksInput() {
+  const database = requireOpenDatabase();
+  const queueId = normalizeUserText(
+    stage6Dom.addTasksQueue.value
+  );
+  const taskTexts = parseAddTaskTexts(
+    stage6Dom.addTasksText.value
+  );
+  let firstInvalidControl = null;
+
+  clearFieldError(
+    stage6Dom.addTasksQueueError,
+    stage6Dom.addTasksQueue
+  );
+  clearFieldError(
+    stage6Dom.addTasksTextError,
+    stage6Dom.addTasksText
+  );
+
+  if (queueId.length === 0) {
+    showFieldError(
+      stage6Dom.addTasksQueueError,
+      "Select a queue.",
+      stage6Dom.addTasksQueue
+    );
+    firstInvalidControl = stage6Dom.addTasksQueue;
+  } else if (getQueueById(database, queueId) === null) {
+    showFieldError(
+      stage6Dom.addTasksQueueError,
+      "Select a valid queue.",
+      stage6Dom.addTasksQueue
+    );
+    firstInvalidControl = stage6Dom.addTasksQueue;
+  }
+
+  if (taskTexts.length === 0) {
+    showFieldError(
+      stage6Dom.addTasksTextError,
+      "Enter at least one task.",
+      stage6Dom.addTasksText
+    );
+
+    if (firstInvalidControl === null) {
+      firstInvalidControl = stage6Dom.addTasksText;
+    }
+  }
+
+  return {
+    isValid: firstInvalidControl === null,
+    queueId,
+    taskTexts,
+    firstInvalidControl
+  };
+}
+
+function showAddTasksOperationError(error) {
+  const message = getErrorMessage(
+    error,
+    "Could not add tasks."
+  );
+  const database = getDatabase();
+  const queueId = normalizeUserText(
+    stage6Dom.addTasksQueue.value
+  );
+  const queueExists = (
+    database !== null &&
+    queueId.length > 0 &&
+    getQueueById(database, queueId) !== null
+  );
+
+  if (!queueExists) {
+    showFieldError(
+      stage6Dom.addTasksQueueError,
+      message,
+      stage6Dom.addTasksQueue
+    );
+    focusElementSafely(stage6Dom.addTasksQueue);
+    return;
+  }
+
+  showFieldError(
+    stage6Dom.addTasksTextError,
+    message,
+    stage6Dom.addTasksText
+  );
+  focusElementSafely(stage6Dom.addTasksText);
+}
+
+function openAddTasksDialog(opener = null) {
+  if (!canOpenStmDialog(stage6Dom.addTasksDialog)) {
+    return false;
+  }
+
+  const database = requireOpenDatabase();
+
+  if (getFirstWorkflowStep(database) === null) {
+    throw new Error(
+      "Cannot add tasks without a workflow step."
+    );
+  }
+
+  if (database.queues.length === 0) {
+    throw new Error(
+      "Cannot add tasks without a queue."
+    );
+  }
+
+  clearAddTasksDialog();
+  renderAddTasksQueueOptions(database);
+
+  return openStmDialog(
+    stage6Dom.addTasksDialog,
+    opener,
+    stage6Dom.addTasksQueue,
+    clearAddTasksDialog
+  );
+}
+
+function confirmAddTasks() {
+  const validation = validateAddTasksInput();
+
+  if (!validation.isValid) {
+    focusElementSafely(
+      validation.firstInvalidControl
+    );
+    return false;
+  }
+
+  let createdTasks;
+
+  try {
+    createdTasks = createTasks(
+      validation.queueId,
+      validation.taskTexts
+    );
+  } catch (error) {
+    showAddTasksOperationError(error);
+    return false;
+  }
+
+  renderApp();
+  closeStmDialog(stage6Dom.addTasksDialog);
+
+  return createdTasks;
+}
+
+// ============================================================
+// Edit Task controller
+// ============================================================
+
+const editTaskState = {
+  queueId: null,
+  taskUid: null
+};
+
+function clearEditTaskDialog() {
+  editTaskState.queueId = null;
+  editTaskState.taskUid = null;
+
+  stage6Dom.editTaskId.textContent = "";
+  stage6Dom.editTaskStep.textContent = "";
+  stage6Dom.editTaskText.value = "";
+  stage6Dom.taskJournal.replaceChildren();
+
+  stage6Dom.editTaskNextStepButton.hidden = true;
+  stage6Dom.editTaskNextStepButton.textContent = "";
+
+  clearFieldError(
+    stage6Dom.editTaskTextError,
+    stage6Dom.editTaskText
+  );
+}
+
+function findRenderedTaskEditControl(queueId, taskUid) {
+  if (
+    !isNonEmptyString(queueId) ||
+    !isNonEmptyString(taskUid)
+  ) {
+    return null;
+  }
+
+  const rows = renderDom.queuesContainer.querySelectorAll(
+    '[data-role="task-row"]'
+  );
+
+  for (const row of rows) {
+    if (
+      row.dataset.queueId === queueId &&
+      row.dataset.taskUid === taskUid
+    ) {
+      return row.querySelector(
+        '[data-action="edit-task"]'
+      );
+    }
+  }
+
+  return null;
+}
+
+function cleanupEditTaskDialog(opener) {
+  const queueId =
+    editTaskState.queueId;
+
+  const taskUid =
+    editTaskState.taskUid;
+
+  const openerUsable =
+    isUsableFocusTarget(opener);
+
+  const recoveryTarget =
+    openerUsable
+      ? null
+      : findRenderedTaskEditControl(
+          queueId,
+          taskUid
+        );
+
+  clearEditTaskDialog();
+
+  if (openerUsable) {
+    return;
+  }
+
+  if (
+    focusElementSafely(
+      recoveryTarget
+    )
+  ) {
+    return;
+  }
+
+  focusQueueApply(queueId);
+}
+
+function requireEditTaskContext() {
+  if (
+    !isNonEmptyString(editTaskState.queueId) ||
+    !isNonEmptyString(editTaskState.taskUid)
+  ) {
+    throw new Error(
+      "Edit Task dialog is not initialized."
+    );
+  }
+
+  const database = requireOpenDatabase();
+  const queue = requireQueue(
+    database,
+    editTaskState.queueId
+  );
+  const task = requireTask(
+    queue,
+    editTaskState.taskUid
+  );
+
+  return {
+    database,
+    queue,
+    task
+  };
+}
+
+function renderEditTaskJournal(task) {
+  if (!Array.isArray(task.journal)) {
+    throw new Error(
+      `Task ${task.id} has an invalid journal.`
+    );
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  for (const entry of task.journal) {
+    const item = cloneRenderTemplate(
+      stage6Dom.taskJournalEntryTemplate,
+      "task-journal-entry-template"
+    );
+
+    requireRenderElement(
+      '[data-role="journal-time"]',
+      item
+    ).textContent = entry.at;
+
+    requireRenderElement(
+      '[data-role="journal-text"]',
+      item
+    ).textContent = entry.text;
+
+    fragment.append(item);
+  }
+
+  stage6Dom.taskJournal.replaceChildren(fragment);
+}
+
+function renderEditTaskNextStep(database, task) {
+  const currentStep = requireWorkflowStep(
+    database,
+    task.stepId
+  );
+  const nextStep = getNextWorkflowStep(
+    database,
+    currentStep.id
+  );
+
+  stage6Dom.editTaskNextStepButton.hidden =
+    nextStep === null;
+
+  stage6Dom.editTaskNextStepButton.textContent =
+    nextStep === null
+      ? ""
+      : `Go to ${nextStep.name}`;
+
+  return currentStep;
+}
+
+function refreshEditTaskModelView() {
+  const {
+    database,
+    task
+  } = requireEditTaskContext();
+
+  const currentStep = renderEditTaskNextStep(
+    database,
+    task
+  );
+
+  stage6Dom.editTaskId.textContent = String(task.id);
+  stage6Dom.editTaskStep.textContent =
+    currentStep.name;
+
+  renderEditTaskJournal(task);
+
+  return task;
+}
+
+function openEditTaskDialog(
+  queueId,
+  taskUid,
+  opener = null
+) {
+  if (!canOpenStmDialog(stage6Dom.editTaskDialog)) {
+    return false;
+  }
+
+  const database = requireOpenDatabase();
+  const queue = requireQueue(database, queueId);
+  const task = requireTask(queue, taskUid);
+  const resolvedOpener = resolveDialogOpener(opener);
+
+  requireWorkflowStep(database, task.stepId);
+  clearEditTaskDialog();
+
+  editTaskState.queueId = queue.id;
+  editTaskState.taskUid = task.uid;
+
+  stage6Dom.editTaskText.value = task.text;
+
+  refreshEditTaskModelView();
+
+  return openStmDialog(
+    stage6Dom.editTaskDialog,
+    resolvedOpener,
+    stage6Dom.editTaskText,
+    () => cleanupEditTaskDialog(resolvedOpener)
+  );
+}
+
+function moveEditTaskToNextStep() {
+  const {
+    queue,
+    task
+  } = requireEditTaskContext();
+
+  const movedTask = moveTaskToNextStep(
+    queue.id,
+    task.uid
+  );
+
+  renderApp();
+  refreshEditTaskModelView();
+
+  return movedTask;
+}
+
+function saveEditTask() {
+  const {
+    queue,
+    task
+  } = requireEditTaskContext();
+
+  const normalizedText = normalizeUserText(
+    stage6Dom.editTaskText.value
+  );
+
+  clearFieldError(
+    stage6Dom.editTaskTextError,
+    stage6Dom.editTaskText
+  );
+
+  if (normalizedText.length === 0) {
+    showFieldError(
+      stage6Dom.editTaskTextError,
+      "Task text must not be empty.",
+      stage6Dom.editTaskText
+    );
+    focusElementSafely(stage6Dom.editTaskText);
+    return false;
+  }
+
+  let updatedTask;
+
+  try {
+    updatedTask = updateTaskText(
+      queue.id,
+      task.uid,
+      normalizedText
+    );
+  } catch (error) {
+    showFieldError(
+      stage6Dom.editTaskTextError,
+      getErrorMessage(
+        error,
+        "Could not save the task."
+      ),
+      stage6Dom.editTaskText
+    );
+    focusElementSafely(stage6Dom.editTaskText);
+    return false;
+  }
+
+  renderApp();
+  closeStmDialog(stage6Dom.editTaskDialog);
+
+  return updatedTask;
+}
+
+// ============================================================
+// Operation feedback
+// ============================================================
+
+const integrationRuntime = {
+  initialized: false,
+  databaseLoadPending: false,
+  lastStatusMessage: "",
+  statusVariant: false
+};
+
+const stage7Dom = Object.freeze({
+  statusMessage: requireRenderElement(
+    '[data-role="status-message"]'
+  ),
+  databaseFileInput: requireRenderElement(
+    '[data-role="database-file-input"]'
+  ),
+  manageStepsForm: requireRenderElement(
+    "#manage-steps-form",
+    stage5Dom.manageStepsDialog
+  ),
+  addStepButton: requireRenderElement(
+    '[data-action="add-step"]',
+    stage5Dom.manageStepsDialog
+  ),
+  manageQueuesForm: requireRenderElement(
+    "#manage-queues-form",
+    stage5Dom.manageQueuesDialog
+  ),
+  cancelButtons: Object.freeze(
+    Array.from(
+      document.querySelectorAll(
+        'button[data-action="cancel-dialog"]'
+      )
+    )
+  )
+});
+
+function clearStatusMessage() {
+  integrationRuntime.lastStatusMessage = "";
+  integrationRuntime.statusVariant = false;
+  stage7Dom.statusMessage.textContent = "";
+}
+
+function showStatusMessage(message) {
+  const normalizedMessage = normalizeUserText(message);
+
+  if (normalizedMessage.length === 0) {
+    clearStatusMessage();
+    return;
+  }
+
+  let renderedMessage = normalizedMessage;
+
+  if (
+    integrationRuntime.lastStatusMessage === normalizedMessage
+  ) {
+    integrationRuntime.statusVariant =
+      !integrationRuntime.statusVariant;
+
+    renderedMessage += integrationRuntime.statusVariant
+      ? "\u200B"
+      : "\u2060";
+  } else {
+    integrationRuntime.statusVariant = false;
+  }
+
+  integrationRuntime.lastStatusMessage = normalizedMessage;
+  stage7Dom.statusMessage.textContent = renderedMessage;
+}
+
+function reportUiError(error, userMessage) {
+  console.error(error);
+  showStatusMessage(userMessage);
+}
+
+function buildQueueViewStatusMessage(
+  database,
+  queue
+) {
+  const view = getQueueViewResult(
+    database,
+    queue
+  );
+
+  const settings = view.settings;
+
+  const filterName =
+    settings.filterStepId === ""
+      ? "All Steps"
+      : requireWorkflowStep(
+          database,
+          settings.filterStepId
+        ).name;
+
+  const searchPart =
+    settings.searchQuery === ""
+      ? ""
+      : ` Search: ${settings.searchQuery}.`;
+
+  const direction =
+    settings.sortDirection === "desc"
+      ? "descending"
+      : "ascending";
+
+  const sortLabel =
+    QUEUE_VIEW_SORT_LABELS[
+      settings.sortField
+    ];
+
+  return (
+    `Queue "${queue.name}". ` +
+    `Filter: ${filterName}.` +
+    searchPart +
+    ` Sorted by ${sortLabel} ${direction}. ` +
+    `Showing ${view.visibleCount} of ${view.totalCount} tasks.`
+  );
+}
+
+function buildQueueTaskStatusMessage(
+  database,
+  queueId,
+  operationMessage
+) {
+  const queue = requireQueue(
+    database,
+    queueId
+  );
+
+  const view = getQueueViewResult(
+    database,
+    queue
+  );
+
+  return (
+    `${operationMessage} ` +
+    `Queue "${queue.name}" is showing ` +
+    `${view.visibleCount} of ${view.totalCount} tasks.`
+  );
+}
+
+// ============================================================
+// Event handlers / event routing
+// ============================================================
+
+function setDatabaseLoadPending(isPending) {
+  integrationRuntime.databaseLoadPending = isPending;
+  renderDom.createDatabaseButton.disabled = isPending;
+  renderDom.openDatabaseButton.disabled = isPending;
+}
+
+function focusAfterDatabaseOpened() {
+  focusElementSafely(renderDom.saveDataButton);
+}
+
+function handleCreateDatabase() {
+  if (
+    integrationRuntime.databaseLoadPending ||
+    getDatabase() !== null
+  ) {
+    return;
+  }
+
+  try {
+    createDatabase();
+    renderApp();
+
+    showStatusMessage("New database created.");
+    focusElementSafely(renderDom.manageStepsButton);
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not create a new database."
+    );
+  }
+}
+
+function handleOpenDatabaseRequest() {
+  if (integrationRuntime.databaseLoadPending) {
+    return;
+  }
+
+  if (getDatabase() !== null) {
+    showStatusMessage(
+      "Close the current database before opening another database."
+    );
+    return;
+  }
+
+  stage7Dom.databaseFileInput.value = "";
+  stage7Dom.databaseFileInput.click();
+}
+
+async function handleDatabaseFileChange(event) {
+  const input = event.currentTarget;
+  const file = input.files && input.files[0];
+
+  if (!(file instanceof File)) {
+    input.value = "";
+    return;
+  }
+
+  if (
+    integrationRuntime.databaseLoadPending ||
+    getDatabase() !== null
+  ) {
+    input.value = "";
+    return;
+  }
+
+  setDatabaseLoadPending(true);
+
+  try {
+    await loadDatabaseFromFile(file);
+    renderApp();
+
+    showStatusMessage("Database loaded.");
+    focusAfterDatabaseOpened();
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not open database. Select a valid STM JSON database file."
+    );
+  } finally {
+    input.value = "";
+    setDatabaseLoadPending(false);
+  }
+}
+
+function handleSaveData() {
+  try {
+    saveDatabaseToFile();
+
+    showStatusMessage(
+      "Database download started. The browser is handling the file save."
+    );
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not start the database download."
+    );
+  }
+}
+
+function handleCloseDatabase() {
+  if (getDatabase() === null) {
+    return;
+  }
+
+  if (
+    hasUnsavedChanges() &&
+    !window.confirm(
+      "This database has unsaved changes. " +
+      "Close it and permanently discard those changes?"
+    )
+  ) {
+    return;
+  }
+
+  try {
+    clearDatabase();
+    renderApp();
+
+    showStatusMessage("Database closed.");
+    focusElementSafely(renderDom.openDatabaseButton);
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not close the database."
+    );
+  }
+}
+
+function handleManageStepsRequest(event) {
+  try {
+    openManageStepsDialog(event.currentTarget);
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not open Manage Steps."
+    );
+  }
+}
+
+function handleManageQueuesRequest(event) {
+  try {
+    openManageQueuesDialog(event.currentTarget);
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not open Manage Queues."
+    );
+  }
+}
+
+function handleAddTasksRequest(event) {
+  try {
+    openAddTasksDialog(event.currentTarget);
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not open Add Tasks."
+    );
+  }
+}
+
+function handleCancelDialog(event) {
+  try {
+    cancelStmDialogFromControl(event.currentTarget);
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not close the dialog."
+    );
+  }
+}
+
+function handleAddStep() {
+  try {
+    if (addManageStepDraft()) {
+      showStatusMessage(
+        "Workflow step added to pending changes."
+      );
+    } else {
+      showStatusMessage(
+        "Workflow step was not added. Check the dialog for errors."
+      );
+    }
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not add the workflow step."
+    );
+  }
+}
+
+function handleManageStepsSubmit(event) {
+  event.preventDefault();
+
+  try {
+    const previousStepCount =
+      requireOpenDatabase().workflow.length;
+
+    if (!saveManageSteps()) {
+      showStatusMessage(
+        "Workflow changes were not saved. Check the dialog for errors."
+      );
+      return;
+    }
+
+    const addedStepCount =
+      requireOpenDatabase().workflow.length -
+      previousStepCount;
+
+    const addedMessage = addedStepCount > 0
+      ? `${addedStepCount} workflow ${
+          addedStepCount === 1 ? "step" : "steps"
+        } added. `
+      : "";
+
+    showStatusMessage(
+      `${addedMessage}Workflow changes saved.`
+    );
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not save workflow changes."
+    );
+  }
+}
+
+function handleAddQueue() {
+  try {
+    if (addManageQueueDraft()) {
+      showStatusMessage(
+        "Queue added to pending changes."
+      );
+    } else {
+      showStatusMessage(
+        "Queue was not added. Check the dialog for errors."
+      );
+    }
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not add the queue."
+    );
+  }
+}
+
+function handleQueueListClick(event) {
+  if (!(event.target instanceof Element)) {
+    return;
+  }
+
+  const control = event.target.closest(
+    '[data-action="delete-queue"]'
+  );
+
+  if (
+    !(control instanceof HTMLButtonElement) ||
+    !stage5Dom.queueList.contains(control)
+  ) {
+    return;
+  }
+
+  try {
+    if (deleteManageQueueDraftFromControl(control)) {
+      showStatusMessage(
+        "Queue removal recorded in pending changes. Save changes to apply it."
+      );
+    }
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not remove the queue."
+    );
+  }
+}
+
+function buildQueueSaveStatus(
+  createdCount,
+  deletedCount
+) {
+  const parts = [];
+
+  if (createdCount > 0) {
+    parts.push(
+      `${createdCount} ${
+        createdCount === 1 ? "queue" : "queues"
+      } created.`
+    );
+  }
+
+  if (deletedCount > 0) {
+    parts.push(
+      `${deletedCount} ${
+        deletedCount === 1 ? "queue" : "queues"
+      } deleted.`
+    );
+  }
+
+  parts.push("Queue changes saved.");
+
+  return parts.join(" ");
+}
+
+function handleManageQueuesSubmit(event) {
+  event.preventDefault();
+
+  try {
+    const previousQueueCount =
+      requireOpenDatabase().queues.length;
+
+    const deletedQueueCount =
+      getDeletedManageQueueIds().length;
+
+    if (!saveManageQueues()) {
+      showStatusMessage(
+        "Queue changes were not saved. Check the dialog for errors."
+      );
+      return;
+    }
+
+    const createdQueueCount =
+      requireOpenDatabase().queues.length -
+      previousQueueCount +
+      deletedQueueCount;
+
+    showStatusMessage(
+      buildQueueSaveStatus(
+        createdQueueCount,
+        deletedQueueCount
+      )
+    );
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not save queue changes."
+    );
+  }
+}
+
+function handleAddTasksSubmit(event) {
+  event.preventDefault();
+
+  try {
+    const createdTasks = confirmAddTasks();
+
+    if (createdTasks === false) {
+      showStatusMessage(
+        "Tasks were not created. Check the dialog for errors."
+      );
+      return;
+    }
+
+    const count = createdTasks.length;
+
+    showStatusMessage(
+      `${count} ${
+        count === 1 ? "task" : "tasks"
+      } created.`
+    );
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not create tasks."
+    );
+  }
+}
+
+function handleQueueViewSubmit(event) {
+  const form = event.target;
+
+  if (
+    !(form instanceof HTMLFormElement) ||
+    !form.matches(
+      '[data-role="queue-view-form"]'
+    ) ||
+    !renderDom.queuesContainer.contains(form)
+  ) {
+    return;
+  }
+
+  event.preventDefault();
+
+  try {
+    const section = form.closest(
+      '[data-role="queue-section"]'
+    );
+
+    if (
+      section === null ||
+      !renderDom.queuesContainer.contains(
+        section
+      )
+    ) {
+      throw new Error(
+        "Queue view form is not inside a queue section."
+      );
+    }
+
+    const queueId = requireEntityId(
+      section.dataset.queueId,
+      "Queue ID"
+    );
+
+    const database =
+      requireOpenDatabase();
+
+    const queue = requireQueue(
+      database,
+      queueId
+    );
+
+    const elements =
+      getQueueViewRenderElements(
+        section
+      );
+
+    saveQueueViewSettings(
+      database,
+      queueId,
+      {
+        filterStepId:
+          elements.filterStep.value,
+
+        sortField:
+          elements.sortField.value,
+
+        sortDirection:
+          elements.sortDirection.value,
+
+        searchQuery:
+          elements.search.value.trim()
+      }
+    );
+
+    rerenderQueueSection(
+      queueId,
+      true
+    );
+
+    showStatusMessage(
+      buildQueueViewStatusMessage(
+        database,
+        queue
+      )
+    );
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not apply queue view settings."
+    );
+  }
+}
+
+function getTaskActionContext(control) {
+  const row = control.closest(
+    '[data-role="task-row"]'
+  );
+
+  if (
+    row === null ||
+    !renderDom.queuesContainer.contains(row)
+  ) {
+    throw new Error(
+      "Task action is not inside a rendered task row."
+    );
+  }
+
+  const queueId = requireEntityId(
+    row.dataset.queueId,
+    "Queue ID"
+  );
+
+  const taskUid = requireEntityId(
+    row.dataset.taskUid,
+    "Task UID"
+  );
+
+  return {
+    row,
+    queueId,
+    taskUid
+  };
+}
+
+function findRenderedTaskActionControl(
+  queueId,
+  taskUid,
+  action
+) {
+  const rows =
+    renderDom.queuesContainer.querySelectorAll(
+      '[data-role="task-row"]'
+    );
+
+  for (const row of rows) {
+    if (
+      row.dataset.queueId === queueId &&
+      row.dataset.taskUid === taskUid
+    ) {
+      return row.querySelector(
+        `[data-action="${action}"]`
+      );
+    }
+  }
+
+  return null;
+}
+
+function restoreFocusAfterTaskMove(
+  queueId,
+  taskUid
+) {
+  const nextStepControl =
+    findRenderedTaskActionControl(
+      queueId,
+      taskUid,
+      "next-step"
+    );
+
+  if (
+    focusElementSafely(
+      nextStepControl
+    )
+  ) {
+    return;
+  }
+
+  const editControl =
+    findRenderedTaskActionControl(
+      queueId,
+      taskUid,
+      "edit-task"
+    );
+
+  if (
+    focusElementSafely(
+      editControl
+    )
+  ) {
+    return;
+  }
+
+  if (focusQueueApply(queueId)) {
+    return;
+  }
+
+  focusStableWorkspaceControl();
+}
+
+function focusStableWorkspaceControl() {
+  const candidates = [
+    renderDom.addTasksButton,
+    renderDom.manageQueuesButton,
+    renderDom.manageStepsButton,
+    renderDom.saveDataButton
+  ];
+
+  for (const control of candidates) {
+    if (focusElementSafely(control)) {
+      return;
+    }
+  }
+}
+
+function handleTaskNextStep(
+  control,
+  context
+) {
+  const shouldRestoreFocus =
+    document.activeElement === control;
+
+  try {
+    const database =
+      requireOpenDatabase();
+
+    const movedTask =
+      moveTaskToNextStep(
+        context.queueId,
+        context.taskUid
+      );
+
+    const step =
+      requireWorkflowStep(
+        database,
+        movedTask.stepId
+      );
+
+    renderApp();
+
+    showStatusMessage(
+      buildQueueTaskStatusMessage(
+        database,
+        context.queueId,
+        `Task ${movedTask.id} moved to ${step.name}.`
+      )
+    );
+
+    if (shouldRestoreFocus) {
+      restoreFocusAfterTaskMove(
+        context.queueId,
+        context.taskUid
+      );
+    }
+  } catch (error) {
+    reportUiError(
+      error,
+      "Task could not be moved to the next workflow step."
+    );
+  }
+}
+
+function handleTaskEdit(
+  control,
+  context
+) {
+  try {
+    openEditTaskDialog(
+      context.queueId,
+      context.taskUid,
+      control
+    );
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not open the task editor."
+    );
+  }
+}
+
+function handleTaskDelete(
+  control,
+  context
+) {
+  try {
+    const database =
+      requireOpenDatabase();
+
+    const queue = requireQueue(
+      database,
+      context.queueId
+    );
+
+    const task = requireTask(
+      queue,
+      context.taskUid
+    );
+
+    if (
+      !window.confirm(
+        `Permanently delete task ${task.id}? ` +
+        "This action cannot be undone."
+      )
+    ) {
+      return;
+    }
+
+    const shouldRestoreFocus =
+      document.activeElement === control;
+
+    const deletedTask = deleteTask(
+      context.queueId,
+      context.taskUid
+    );
+
+    renderApp();
+
+    showStatusMessage(
+      buildQueueTaskStatusMessage(
+        database,
+        context.queueId,
+        `Task ${deletedTask.id} deleted.`
+      )
+    );
+
+    if (
+      shouldRestoreFocus &&
+      !focusQueueApply(
+        context.queueId
+      )
+    ) {
+      focusStableWorkspaceControl();
+    }
+  } catch (error) {
+    reportUiError(
+      error,
+      "Task could not be deleted."
+    );
+  }
+}
+
+function handleTaskTableClick(event) {
+  if (!(event.target instanceof Element)) {
+    return;
+  }
+
+  const control = event.target.closest(
+    '[data-action="next-step"], ' +
+    '[data-action="edit-task"], ' +
+    '[data-action="delete-task"]'
+  );
+
+  if (
+    !(control instanceof HTMLButtonElement) ||
+    !renderDom.queuesContainer.contains(control)
+  ) {
+    return;
+  }
+
+  let context;
+
+  try {
+    context = getTaskActionContext(control);
+  } catch (error) {
+    reportUiError(
+      error,
+      "Task action could not be completed."
+    );
+    return;
+  }
+
+  switch (control.dataset.action) {
+    case "next-step":
+      handleTaskNextStep(
+        control,
+        context
+      );
+      break;
+
+    case "edit-task":
+      handleTaskEdit(
+        control,
+        context
+      );
+      break;
+
+    case "delete-task":
+      handleTaskDelete(
+        control,
+        context
+      );
+      break;
+  }
+}
+
+function handleEditTaskNextStep() {
+  try {
+    const queueId =
+      requireEditTaskContext().queue.id;
+
+    const movedTask =
+      moveEditTaskToNextStep();
+
+    const database =
+      requireOpenDatabase();
+
+    const step =
+      requireWorkflowStep(
+        database,
+        movedTask.stepId
+      );
+
+    showStatusMessage(
+      buildQueueTaskStatusMessage(
+        database,
+        queueId,
+        `Task ${movedTask.id} moved to ${step.name}.`
+      )
+    );
+
+    if (
+      !isUsableFocusTarget(
+        stage6Dom.editTaskNextStepButton
+      )
+    ) {
+      focusElementSafely(
+        stage6Dom.editTaskText
+      );
+    }
+  } catch (error) {
+    reportUiError(
+      error,
+      "Task could not be moved to the next workflow step."
+    );
+  }
+}
+
+function handleEditTaskSubmit(event) {
+  event.preventDefault();
+
+  try {
+    const context =
+      requireEditTaskContext();
+
+    const queueId =
+      context.queue.id;
+
+    const originalText =
+      context.task.text;
+
+    const taskId =
+      context.task.id;
+
+    const savedTask =
+      saveEditTask();
+
+    if (savedTask === false) {
+      showStatusMessage(
+        "Task was not saved. Check the dialog for errors."
+      );
+      return;
+    }
+
+    if (savedTask.text === originalText) {
+      showStatusMessage(
+        `Task ${taskId} saved.`
+      );
+      return;
+    }
+
+    showStatusMessage(
+      buildQueueTaskStatusMessage(
+        requireOpenDatabase(),
+        queueId,
+        `Task ${taskId} text changed.`
+      )
+    );
+  } catch (error) {
+    reportUiError(
+      error,
+      "Could not save the task."
+    );
+  }
+}
+
+// ============================================================
+// Application initialization
+// ============================================================
+
+function bindPrimaryActionEvents() {
+  renderDom.createDatabaseButton.addEventListener(
+    "click",
+    handleCreateDatabase
+  );
+
+  renderDom.openDatabaseButton.addEventListener(
+    "click",
+    handleOpenDatabaseRequest
+  );
+
+  renderDom.closeDatabaseButton.addEventListener(
+    "click",
+    handleCloseDatabase
+  );
+
+  renderDom.saveDataButton.addEventListener(
+    "click",
+    handleSaveData
+  );
+
+  renderDom.manageStepsButton.addEventListener(
+    "click",
+    handleManageStepsRequest
+  );
+
+  renderDom.manageQueuesButton.addEventListener(
+    "click",
+    handleManageQueuesRequest
+  );
+
+  renderDom.addTasksButton.addEventListener(
+    "click",
+    handleAddTasksRequest
+  );
+}
+
+function bindDialogEvents() {
+  stage7Dom.addStepButton.addEventListener(
+    "click",
+    handleAddStep
+  );
+
+  stage5Dom.addQueueButton.addEventListener(
+    "click",
+    handleAddQueue
+  );
+
+  stage5Dom.queueList.addEventListener(
+    "click",
+    handleQueueListClick
+  );
+
+  stage6Dom.editTaskNextStepButton.addEventListener(
+    "click",
+    handleEditTaskNextStep
+  );
+
+  for (const button of stage7Dom.cancelButtons) {
+    button.addEventListener(
+      "click",
+      handleCancelDialog
+    );
+  }
+}
+
+function bindFormEvents() {
+  stage7Dom.manageStepsForm.addEventListener(
+    "submit",
+    handleManageStepsSubmit
+  );
+
+  stage7Dom.manageQueuesForm.addEventListener(
+    "submit",
+    handleManageQueuesSubmit
+  );
+
+  stage6Dom.addTasksForm.addEventListener(
+    "submit",
+    handleAddTasksSubmit
+  );
+
+  stage6Dom.editTaskForm.addEventListener(
+    "submit",
+    handleEditTaskSubmit
+  );
+
+  renderDom.queuesContainer.addEventListener(
+    "submit",
+    handleQueueViewSubmit
+  );
+}
+
+function initializeApp() {
+  if (integrationRuntime.initialized) {
+    return false;
+  }
+
+  integrationRuntime.initialized = true;
+
+  bindPrimaryActionEvents();
+  bindDialogEvents();
+  bindFormEvents();
+
+  stage7Dom.databaseFileInput.addEventListener(
+    "change",
+    handleDatabaseFileChange
+  );
+
+  renderDom.queuesContainer.addEventListener(
+    "click",
+    handleTaskTableClick
+  );
+
+  clearStatusMessage();
+  renderApp();
+
+  return true;
+}
+
+initializeApp();
+  </script>
+</body>
+</html>
