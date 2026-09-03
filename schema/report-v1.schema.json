@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://localhost/schema/report-v1.schema.json",
+  "title": "Отчёт dsl-validator schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source_file", "dsl_version", "analysis", "summary", "entries"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "source_file": {"type":"object","required":["path","name"],"properties":{"path":{"type":"string"},"name":{"type":"string"}},"additionalProperties":false},
+    "dsl_version": {"type":"object","required":["status","raw","canonical"],"properties":{"status":{"enum":["determined","undefined"]},"raw":{"type":["string","null"]},"canonical":{"type":["string","null"]}},"additionalProperties":false},
+    "analysis": {"type":"object"}, "summary":{"type":"object"}, "entries":{"type":"array"}
+  }
+}
