@@ -13,23 +13,29 @@ type contextView struct {
 
 // cursorView хранит путь и связь с контекстом.
 type cursorView struct {
-	context *contextView
-	node    validatorapi.Node
-	path    []int
+	context  *contextView
+	node     validatorapi.Node
+	path     []int
+	parent   *cursorView
+	children []*cursorView
 }
 
 // newContext строит навигацию только из готового AST.
 func newContext(document validatorapi.Document) *contextView {
 	c := &contextView{document: document}
-	var add func([]validatorapi.Node, []int)
-	add = func(nodes []validatorapi.Node, parent []int) {
+	var add func([]validatorapi.Node, []int, *cursorView)
+	add = func(nodes []validatorapi.Node, parentPath []int, parent *cursorView) {
 		for i, n := range nodes {
-			path := append(append([]int(nil), parent...), i)
-			c.cursors = append(c.cursors, &cursorView{context: c, node: n, path: path})
-			add(n.Children(), path)
+			path := append(append([]int(nil), parentPath...), i)
+			cursor := &cursorView{context: c, node: n, path: path, parent: parent}
+			c.cursors = append(c.cursors, cursor)
+			if parent != nil {
+				parent.children = append(parent.children, cursor)
+			}
+			add(n.Children(), path, cursor)
 		}
 	}
-	add(document.Roots(), nil)
+	add(document.Roots(), nil, nil)
 	return c
 }
 func (c *contextView) Document() validatorapi.Document { return c.document }
@@ -37,21 +43,22 @@ func (c *contextView) Walk(visit func(validatorapi.Cursor) bool) {
 	if visit == nil {
 		return
 	}
-	var walk func([]validatorapi.Node, []int) bool
-	walk = func(nodes []validatorapi.Node, parent []int) bool {
-		for i, n := range nodes {
-			path := append(append([]int(nil), parent...), i)
-			cur := c.find(path)
-			if !visit(cur) {
+	var walk func([]*cursorView)
+	walk = func(cursors []*cursorView) {
+		for _, cursor := range cursors {
+			if !visit(cursor) {
 				continue
 			}
-			if !walk(n.Children(), path) {
-				return false
-			}
+			walk(cursor.children)
 		}
-		return true
 	}
-	walk(c.document.Roots(), nil)
+	roots := make([]*cursorView, 0)
+	for _, cursor := range c.cursors {
+		if cursor.parent == nil {
+			roots = append(roots, cursor)
+		}
+	}
+	walk(roots)
 }
 func (c *contextView) PhysicalNodes() []validatorapi.Cursor {
 	out := make([]validatorapi.Cursor, 0)
@@ -118,10 +125,10 @@ func (c *cursorView) Node() validatorapi.Node { return c.node }
 func (c *cursorView) Path() []int             { return append([]int(nil), c.path...) }
 func (c *cursorView) Depth() int              { return len(c.path) - 1 }
 func (c *cursorView) Parent() (validatorapi.Cursor, bool) {
-	if len(c.path) < 2 {
+	if c.parent == nil {
 		return nil, false
 	}
-	return c.context.find(c.path[:len(c.path)-1]), true
+	return c.parent, true
 }
 func (c *cursorView) PreviousSibling() (validatorapi.Cursor, bool) {
 	if c.path[len(c.path)-1] == 0 {
@@ -139,18 +146,18 @@ func (c *cursorView) NextSibling() (validatorapi.Cursor, bool) {
 	return v, v != nil
 }
 func (c *cursorView) Children() []validatorapi.Cursor {
-	out := make([]validatorapi.Cursor, 0)
-	for _, v := range c.context.cursors {
-		if len(v.path) == len(c.path)+1 && samePath(v.path[:len(c.path)], c.path) {
-			out = append(out, v)
-		}
+	out := make([]validatorapi.Cursor, len(c.children))
+	for i, child := range c.children {
+		out[i] = child
 	}
 	return out
 }
 func (c *cursorView) Ancestors() []validatorapi.Cursor {
-	out := make([]validatorapi.Cursor, 0, len(c.path)-1)
-	for n := 1; n < len(c.path); n++ {
-		out = append(out, c.context.find(c.path[:n]))
+	out := make([]validatorapi.Cursor, c.Depth())
+	ancestor := c.parent
+	for i := len(out) - 1; i >= 0; i-- {
+		out[i] = ancestor
+		ancestor = ancestor.parent
 	}
 	return out
 }

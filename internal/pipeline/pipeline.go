@@ -12,6 +12,9 @@ import (
 	"dslparser/validatorapi"
 )
 
+// ErrVersionExcluded обозначает штатное исключение файла выбранной версией.
+var ErrVersionExcluded = errors.New("файл исключён выбором версии")
+
 // Runner обрабатывает один файл без параллельных диагностик.
 type Runner struct {
 	parser parseradapter.Adapter
@@ -43,6 +46,13 @@ func (r Runner) Run(path, mode string, selected *string) (report.Report, error) 
 	}
 	started := now()
 	out := report.New(path, mode, selected, started)
+	if _, err := os.Stat(path); err != nil {
+		addValidator(&out, "FILE_INFO_FAILURE", err.Error())
+		stage := "opening"
+		out.Analysis.Status, out.Analysis.FailedStage = "incomplete", &stage
+		out.Finish(now())
+		return out, report.WriteAtomic(out)
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		addValidator(&out, "FILE_OPEN_FAILURE", err.Error())
@@ -55,7 +65,7 @@ func (r Runner) Run(path, mode string, selected *string) (report.Report, error) 
 	result := r.parser.ParseReader(file)
 	closeErr := file.Close()
 	if closeErr != nil {
-		addValidator(&out, "FILE_OPEN_FAILURE", closeErr.Error())
+		addValidator(&out, "FILE_CLOSE_FAILURE", closeErr.Error())
 	}
 	if result.Fatal != nil {
 		addParser(&out, string(result.Fatal.Code), result.Fatal.Message, nil, nil)
@@ -71,7 +81,7 @@ func (r Runner) Run(path, mode string, selected *string) (report.Report, error) 
 		raw, canonical := result.Document.VersionRaw(), string(result.Document.Version())
 		out.DSLVersion = report.DSLVersion{Status: "determined", Raw: &raw, Canonical: &canonical}
 		if mode == "explicit" && selected != nil && canonical != *selected {
-			return out, fmt.Errorf("версия %s исключена выбором %s", canonical, *selected)
+			return out, fmt.Errorf("%w: версия %s, выбрана %s", ErrVersionExcluded, canonical, *selected)
 		}
 		for _, issue := range result.Document.ParserIssues() {
 			s := issue.Span()

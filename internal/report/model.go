@@ -2,7 +2,9 @@ package report
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,7 +110,20 @@ type ContextLine struct {
 
 // New создаёт начальную модель отчёта.
 func New(path, mode string, selected *string, started time.Time) Report {
-	return Report{SchemaVersion: 1, SourceFile: SourceFile{Path: path, Name: filepath.Base(path)}, DSLVersion: DSLVersion{Status: "undefined"}, Analysis: Analysis{VersionMode: mode, SelectedVersion: selected, Status: "completed", StartedAt: started}, Entries: []Entry{}}
+	absolute, err := filepath.Abs(path)
+	if err == nil {
+		path = filepath.Clean(absolute)
+	}
+	var selectedCopy *string
+	if selected != nil {
+		value := *selected
+		selectedCopy = &value
+	}
+	var timezone *string
+	if name := started.Location().String(); name != "" && name != "Local" {
+		timezone = &name
+	}
+	return Report{SchemaVersion: 1, SourceFile: SourceFile{Path: path, Name: filepath.Base(path)}, DSLVersion: DSLVersion{Status: "undefined"}, Analysis: Analysis{VersionMode: mode, SelectedVersion: selectedCopy, Status: "completed", StartedAt: started, Timezone: timezone}, Entries: []Entry{}}
 }
 
 // Finish сортирует, нумерует и пересчитывает отчёт; finished задаёт время завершения.
@@ -197,15 +212,112 @@ func (r Report) Validate() error {
 	if r.Analysis.VersionMode != "auto" && r.Analysis.VersionMode != "explicit" {
 		return fmt.Errorf("неверный режим")
 	}
-	if len(r.Entries) != r.Summary.Total {
-		return fmt.Errorf("неверный total")
+	if r.Analysis.VersionMode == "auto" && r.Analysis.SelectedVersion != nil || r.Analysis.VersionMode == "explicit" && (r.Analysis.SelectedVersion == nil || strings.TrimSpace(*r.Analysis.SelectedVersion) == "") {
+		return fmt.Errorf("selected_version не соответствует режиму")
 	}
+	if r.DSLVersion.Status == "determined" {
+		if r.DSLVersion.Raw == nil || r.DSLVersion.Canonical == nil || *r.DSLVersion.Raw == "" || *r.DSLVersion.Canonical == "" {
+			return fmt.Errorf("неполная определённая версия")
+		}
+	} else if r.DSLVersion.Status != "undefined" || r.DSLVersion.Raw != nil || r.DSLVersion.Canonical != nil {
+		return fmt.Errorf("неверная неопределённая версия")
+	}
+	if err := validateAnalysis(r.Analysis); err != nil {
+		return err
+	}
+	want := Summary{}
 	for i, e := range r.Entries {
-		if e.Number != i+1 || e.Code == "" || e.Message == "" {
+		if e.Number != i+1 || strings.TrimSpace(e.Code) == "" || strings.TrimSpace(e.Message) == "" {
 			return fmt.Errorf("неверная запись %d", i+1)
+		}
+		if err := validateEntry(e); err != nil {
+			return fmt.Errorf("неверная запись %d: %w", i+1, err)
+		}
+		want.Total++
+		countEntry(&want, e)
+	}
+	want.HasErrors = want.ByLevel.Error > 0
+	if r.Summary != want {
+		return fmt.Errorf("сводка не соответствует записям")
+	}
+	if r.Analysis.Status == "completed" && want.HasErrors || r.Analysis.Status == "completed_with_errors" && !want.HasErrors {
+		return fmt.Errorf("статус не соответствует ошибкам")
+	}
+	return nil
+}
+
+// validateAnalysis проверяет времена и согласованность статуса анализа.
+func validateAnalysis(a Analysis) error {
+	if a.StartedAt.IsZero() || a.FinishedAt.IsZero() || a.FinishedAt.Before(a.StartedAt) || a.DurationMS < 0 {
+		return fmt.Errorf("неверные времена анализа")
+	}
+	completed := a.Status == "completed" || a.Status == "completed_with_errors"
+	if completed && a.FailedStage != nil {
+		return fmt.Errorf("завершённый анализ содержит failed_stage")
+	}
+	if a.Status == "incomplete" {
+		if a.FailedStage == nil || *a.FailedStage != "opening" && *a.FailedStage != "parsing" && *a.FailedStage != "reporting" {
+			return fmt.Errorf("незавершённый анализ имеет неверную стадию")
+		}
+	} else if !completed {
+		return fmt.Errorf("неверный статус анализа")
+	}
+	return nil
+}
+
+// validateEntry проверяет enum, паспорт и координаты записи.
+func validateEntry(e Entry) error {
+	if e.Level != validatorapi.SeverityError && e.Level != validatorapi.SeverityWarning && e.Level != validatorapi.SeverityRecommendation {
+		return fmt.Errorf("неверный уровень")
+	}
+	if e.Source != validatorapi.SourceParser && e.Source != validatorapi.SourceDiagnostic && e.Source != validatorapi.SourceValidator {
+		return fmt.Errorf("неверный источник")
+	}
+	passport := []*string{e.Category, e.Title, e.Description, e.Basis, e.Reference, e.BadExample}
+	for _, value := range passport {
+		if e.Source == validatorapi.SourceDiagnostic && (value == nil || strings.TrimSpace(*value) == "") || e.Source != validatorapi.SourceDiagnostic && value != nil {
+			return fmt.Errorf("паспорт не соответствует источнику")
+		}
+	}
+	if e.RelatedLocation != nil && e.Location == nil {
+		return fmt.Errorf("связанный диапазон без основного")
+	}
+	if e.Location != nil && !validLocation(*e.Location) || e.RelatedLocation != nil && !validLocation(*e.RelatedLocation) {
+		return fmt.Errorf("неверный диапазон")
+	}
+	if e.Context != nil {
+		for _, line := range e.Context.Lines {
+			if line.Number < 1 || line.Role != "before" && line.Role != "problem" && line.Role != "after" {
+				return fmt.Errorf("неверный контекст")
+			}
 		}
 	}
 	return nil
+}
+
+// validLocation сообщает валидность полуоткрытого диапазона.
+func validLocation(location Location) bool {
+	return location.EndExclusive && (validatorapi.Span{Start: location.Start, End: location.End}).Valid()
+}
+
+// countEntry добавляет запись в счётчики сводки.
+func countEntry(summary *Summary, entry Entry) {
+	switch entry.Level {
+	case validatorapi.SeverityError:
+		summary.ByLevel.Error++
+	case validatorapi.SeverityWarning:
+		summary.ByLevel.Warning++
+	case validatorapi.SeverityRecommendation:
+		summary.ByLevel.Recommendation++
+	}
+	switch entry.Source {
+	case validatorapi.SourceParser:
+		summary.BySource.Parser++
+	case validatorapi.SourceDiagnostic:
+		summary.BySource.Diagnostic++
+	case validatorapi.SourceValidator:
+		summary.BySource.Validator++
+	}
 }
 
 // DecodeStrict строго декодирует один JSON-отчёт без неизвестных полей.
@@ -216,8 +328,12 @@ func DecodeStrict(data []byte) (Report, error) {
 	if err := d.Decode(&r); err != nil {
 		return Report{}, err
 	}
-	if d.More() {
-		return Report{}, fmt.Errorf("лишние JSON-значения")
+	var trailing struct{}
+	if err := d.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = fmt.Errorf("второе JSON-значение")
+		}
+		return Report{}, fmt.Errorf("лишние данные: %w", err)
 	}
 	if err := r.Validate(); err != nil {
 		return Report{}, err

@@ -58,6 +58,9 @@ func (a Adapter) parseReader(r io.Reader) (result Result) {
 		parse = p.ParseReader
 	}
 	document, err := parse(r)
+	if document != nil && err != nil {
+		return Result{Failure: &Failure{Code: "PARSER_CONTRACT_FAILURE", Err: errors.New("парсер вернул документ вместе с ошибкой")}}
+	}
 	if err != nil {
 		var fatal *p.FatalError
 		if errors.As(err, &fatal) {
@@ -69,8 +72,46 @@ func (a Adapter) parseReader(r io.Reader) (result Result) {
 		return Result{Failure: &Failure{Code: "PARSER_CONTRACT_FAILURE", Err: errors.New("парсер вернул nil без ошибки")}}
 	}
 	d := documentView{document}
+	if err := validateDocument(d); err != nil {
+		return Result{Failure: &Failure{Code: "PARSER_CONTRACT_FAILURE", Err: err}}
+	}
 	c := newContext(d)
 	return Result{Document: d, Context: c}
+}
+
+// validateDocument проверяет отображаемые enum до передачи AST потребителям.
+func validateDocument(document validatorapi.Document) error {
+	var validateElements func([]validatorapi.Element) error
+	validateElements = func(elements []validatorapi.Element) error {
+		for _, element := range elements {
+			if element.Kind() == "" {
+				return errors.New("неизвестный вид элемента")
+			}
+			if err := validateElements(element.Children()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var validateNodes func([]validatorapi.Node) error
+	validateNodes = func(nodes []validatorapi.Node) error {
+		for _, node := range nodes {
+			if node.Kind() == "" {
+				return errors.New("неизвестный вид узла")
+			}
+			if block, ok := node.Block(); ok && block.Mode() == "" {
+				return errors.New("неизвестный режим тела")
+			}
+			if err := validateElements(node.Elements()); err != nil {
+				return err
+			}
+			if err := validateNodes(node.Children()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return validateNodes(document.Roots())
 }
 
 // position преобразует координату без изменения.
@@ -114,17 +155,34 @@ func (v blockView) CloseSpan() (validatorapi.Span, bool) {
 func (v blockView) Span() validatorapi.Span { return span(v.value.Span()) }
 func (v blockView) Closed() bool            { return v.value.Closed() }
 func (v blockView) Mode() validatorapi.BodyMode {
-	if v.value.Mode() == p.BodyStructural {
+	switch v.value.Mode() {
+	case p.BodyStructural:
 		return validatorapi.BodyStructural
+	case p.BodyOpaque:
+		return validatorapi.BodyOpaque
+	default:
+		return ""
 	}
-	return validatorapi.BodyOpaque
 }
 
 // elementView является read-only элементом.
 type elementView struct{ value p.Element }
 
 func (v elementView) Kind() validatorapi.ElementKind {
-	return []validatorapi.ElementKind{"", validatorapi.ElementField, validatorapi.ElementToken, validatorapi.ElementBodyLine, validatorapi.ElementSeparator, validatorapi.ElementGroup}[int(v.value.Kind())]
+	switch v.value.Kind() {
+	case p.ElementField:
+		return validatorapi.ElementField
+	case p.ElementToken:
+		return validatorapi.ElementToken
+	case p.ElementBodyLine:
+		return validatorapi.ElementBodyLine
+	case p.ElementSeparator:
+		return validatorapi.ElementSeparator
+	case p.ElementGroup:
+		return validatorapi.ElementGroup
+	default:
+		return ""
+	}
 }
 func (v elementView) Name() string                             { return v.value.Name() }
 func (v elementView) Raw() string                              { return v.value.Raw() }
@@ -145,7 +203,20 @@ func (v elementView) Children() []validatorapi.Element {
 type nodeView struct{ value p.Node }
 
 func (v nodeView) Kind() validatorapi.NodeKind {
-	return []validatorapi.NodeKind{"", validatorapi.NodeStep, validatorapi.NodeHeading, validatorapi.NodeTag, validatorapi.NodeText, validatorapi.NodeBlockBoundary}[int(v.value.Kind())]
+	switch v.value.Kind() {
+	case p.NodeStep:
+		return validatorapi.NodeStep
+	case p.NodeHeading:
+		return validatorapi.NodeHeading
+	case p.NodeTag:
+		return validatorapi.NodeTag
+	case p.NodeText:
+		return validatorapi.NodeText
+	case p.NodeBlockBoundary:
+		return validatorapi.NodeBlockBoundary
+	default:
+		return ""
+	}
 }
 func (v nodeView) Raw() string                              { return v.value.Raw() }
 func (v nodeView) Value() string                            { return v.value.Value() }
