@@ -2,6 +2,7 @@ package report
 
 import (
 	"dslparser/validatorapi"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,4 +46,39 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func TestDecodeStrictRejectsSemanticAndTrailingData(t *testing.T) {
+	selected := "1.1"
+	cases := []struct {
+		name   string
+		change func(*Report)
+	}{
+		{"auto with selected version", func(r *Report) { r.Analysis.SelectedVersion = &selected }},
+		{"invalid summary", func(r *Report) { r.Summary.Total++ }},
+		{"undefined version with raw", func(r *Report) { r.DSLVersion.Raw = &selected }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := New(filepath.Join(t.TempDir(), "lesson.txt"), "auto", nil, time.Now())
+			r.Finish(time.Now())
+			tc.change(&r)
+			data, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecodeStrict(data); err == nil {
+				t.Fatal("invalid report accepted")
+			}
+		})
+	}
+	r := New(filepath.Join(t.TempDir(), "lesson.txt"), "auto", nil, time.Now())
+	r.Finish(time.Now())
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeStrict(append(data, []byte(` {}`)...)); err == nil {
+		t.Fatal("trailing JSON accepted")
+	}
 }
