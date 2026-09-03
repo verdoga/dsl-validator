@@ -5,10 +5,18 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "source_file", "dsl_version", "analysis", "summary", "entries"],
+  "$defs": {
+    "nullableString": {"type": ["string", "null"]},
+    "position": {"type":"object","additionalProperties":false,"required":["line","column"],"properties":{"line":{"type":"integer","minimum":1},"column":{"type":"integer","minimum":1}}},
+    "location": {"type":"object","additionalProperties":false,"required":["start","end","end_exclusive"],"properties":{"start":{"$ref":"#/$defs/position"},"end":{"$ref":"#/$defs/position"},"end_exclusive":{"const":true}}},
+    "context": {"type":"object","additionalProperties":false,"required":["lines"],"properties":{"lines":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["number","role","text"],"properties":{"number":{"type":"integer","minimum":1},"role":{"enum":["before","problem","after"]},"text":{"type":"string"}}}}}}
+  },
   "properties": {
     "schema_version": {"const": 1},
-    "source_file": {"type":"object","required":["path","name"],"properties":{"path":{"type":"string"},"name":{"type":"string"}},"additionalProperties":false},
-    "dsl_version": {"type":"object","required":["status","raw","canonical"],"properties":{"status":{"enum":["determined","undefined"]},"raw":{"type":["string","null"]},"canonical":{"type":["string","null"]}},"additionalProperties":false},
-    "analysis": {"type":"object"}, "summary":{"type":"object"}, "entries":{"type":"array"}
+    "source_file": {"type":"object","additionalProperties":false,"required":["path","name"],"properties":{"path":{"type":"string","minLength":1},"name":{"type":"string","minLength":1}}},
+    "dsl_version": {"type":"object","additionalProperties":false,"required":["status","raw","canonical"],"properties":{"status":{"enum":["determined","undefined"]},"raw":{"$ref":"#/$defs/nullableString"},"canonical":{"$ref":"#/$defs/nullableString"}}},
+    "analysis": {"type":"object","additionalProperties":false,"required":["version_mode","selected_version","status","failed_stage","started_at","finished_at","duration_ms","timezone"],"properties":{"version_mode":{"enum":["auto","explicit"]},"selected_version":{"$ref":"#/$defs/nullableString"},"status":{"enum":["completed","completed_with_errors","incomplete"]},"failed_stage":{"type":["string","null"],"enum":["opening","parsing","reporting",null]},"started_at":{"type":"string","format":"date-time"},"finished_at":{"type":"string","format":"date-time"},"duration_ms":{"type":"integer","minimum":0},"timezone":{"$ref":"#/$defs/nullableString"}}},
+    "summary": {"type":"object","additionalProperties":false,"required":["total","by_level","by_source","has_errors"],"properties":{"total":{"type":"integer","minimum":0},"by_level":{"type":"object","additionalProperties":false,"required":["error","warning","recommendation"],"properties":{"error":{"type":"integer","minimum":0},"warning":{"type":"integer","minimum":0},"recommendation":{"type":"integer","minimum":0}}},"by_source":{"type":"object","additionalProperties":false,"required":["parser","diagnostic","validator"],"properties":{"parser":{"type":"integer","minimum":0},"diagnostic":{"type":"integer","minimum":0},"validator":{"type":"integer","minimum":0}}},"has_errors":{"type":"boolean"}}},
+    "entries": {"type":"array","items":{"type":"object","additionalProperties":false,"required":["number","code","level","source","category","title","message","description","basis","location","related_location","context","reference","bad_example"],"properties":{"number":{"type":"integer","minimum":1},"code":{"type":"string","minLength":1},"level":{"enum":["error","warning","recommendation"]},"source":{"enum":["parser","diagnostic","validator"]},"category":{"$ref":"#/$defs/nullableString"},"title":{"$ref":"#/$defs/nullableString"},"message":{"type":"string","minLength":1},"description":{"$ref":"#/$defs/nullableString"},"basis":{"$ref":"#/$defs/nullableString"},"location":{"anyOf":[{"$ref":"#/$defs/location"},{"type":"null"}]},"related_location":{"anyOf":[{"$ref":"#/$defs/location"},{"type":"null"}]},"context":{"anyOf":[{"$ref":"#/$defs/context"},{"type":"null"}]},"reference":{"$ref":"#/$defs/nullableString"},"bad_example":{"$ref":"#/$defs/nullableString"}}}}
   }
 }
