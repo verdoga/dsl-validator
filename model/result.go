@@ -1,6 +1,6 @@
 package model
 
-import "github.com/verdoga/dsl-parser/diagnostics"
+import "github.com/verdoga/dsl-validator/diagnostics"
 
 // Result — верхнеуровневая модель результата обработки одного DSL-документа.
 type Result struct {

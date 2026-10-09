@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/verdoga/dsl-parser/diagnostics"
+	"github.com/verdoga/dsl-validator/diagnostics"
 )
 
 func TestResultPreservesPopulatedJSON(t *testing.T) {
@@ -151,12 +151,12 @@ func TestDiagnosticPreservesLocationsAndFatalFlag(t *testing.T) {
 		want       string
 	}{
 		{name: "fatal_without_location", diagnostic: Diagnostic{
-			ID: "read-error", Source: "run", DiagnosticCode: diagnostics.IO001, SeverityLevel: diagnostics.SeverityError,
+			ID: "read-error", Source: "run", DiagnosticCode: diagnostics.Code("IO001"), SeverityLevel: diagnostics.SeverityError,
 			Message: "Не удалось прочитать файл", DiagnosticScope: diagnostics.ScopeDocument, Fatal: true, RelatedLocations: []Location{},
 		}, want: `{"id":"read-error","source":"run","code":"IO001","severity":"error","message":"Не удалось прочитать файл",
 			"scope":"document","fatal":true,"location":null,"relatedLocations":[]}`},
 		{name: "multiline_range", diagnostic: Diagnostic{
-			ID: "block-error", Source: "run", DiagnosticCode: diagnostics.P011, SeverityLevel: diagnostics.SeverityError,
+			ID: "block-error", Source: "run", DiagnosticCode: diagnostics.Code("P011"), SeverityLevel: diagnostics.SeverityError,
 			Message: "Незакрытый блок", DiagnosticScope: diagnostics.ScopeBlock,
 			Location: &Location{Start: Position{Line: 1, Column: 7}, End: Position{Line: 3, Column: 2}}, RelatedLocations: []Location{},
 		}, want: `{"id":"block-error","source":"run","code":"P011","severity":"error","message":"Незакрытый блок",
@@ -165,6 +165,32 @@ func TestDiagnosticPreservesLocationsAndFatalFlag(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			assertModelJSON(t, test.diagnostic, test.want)
+		})
+	}
+}
+
+func TestDiagnosticDecodesLegacyAndValidatorCodesWithLocalTypes(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		code     diagnostics.Code
+		severity diagnostics.Severity
+		scope    diagnostics.Scope
+	}{
+		{"legacy IO", `{"code":"IO001","severity":"error","scope":"document"}`, diagnostics.Code("IO001"), diagnostics.SeverityError, diagnostics.ScopeDocument},
+		{"legacy parser", `{"code":"P011","severity":"error","scope":"block"}`, diagnostics.Code("P011"), diagnostics.SeverityError, diagnostics.ScopeBlock},
+		{"validator warning", `{"code":"V001","severity":"warning","scope":"element"}`, diagnostics.Code("V001"), diagnostics.SeverityWarning, diagnostics.ScopeElement},
+		{"validator recommendation", `{"code":"V002","severity":"recommendation","scope":"line"}`, diagnostics.Code("V002"), diagnostics.SeverityRecommendation, diagnostics.ScopeLine},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var diagnostic Diagnostic
+			if err := json.Unmarshal([]byte(tc.input), &diagnostic); err != nil {
+				t.Fatalf("JSON-декодирование: %v", err)
+			}
+			if diagnostic.DiagnosticCode != tc.code || diagnostic.SeverityLevel != tc.severity || diagnostic.DiagnosticScope != tc.scope {
+				t.Errorf("Диагностика = %+v, требуются код %q, уровень %q, область %q", diagnostic, tc.code, tc.severity, tc.scope)
+			}
 		})
 	}
 }
