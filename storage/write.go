@@ -32,8 +32,9 @@ func checkUnchanged(snapshot *Snapshot) error {
 // writeTemporary создаёт временный файл в каталоге назначения, записывает
 // полный payload, сохраняет доступные права исходного файла, вызывает Sync
 // и закрывает его. При отказе удаляет незавершённый временный файл.
+// Короткое имя не зависит от длины имени исходного JSON.
 func writeTemporary(targetPath string, payload []byte, mode os.FileMode) (temporaryPath string, err error) {
-	file, err := os.CreateTemp(filepath.Dir(targetPath), "."+filepath.Base(targetPath)+".tmp-*")
+	file, err := os.CreateTemp(filepath.Dir(targetPath), ".dsl-validator.tmp-*")
 	if err != nil {
 		return "", fmt.Errorf("не удалось создать временный файл для %q: %w", targetPath, err)
 	}
@@ -71,8 +72,9 @@ func writeTemporary(targetPath string, payload []byte, mode os.FileMode) (tempor
 // и очистки сохраняет в err, не удаляя единственную пригодную копию данных.
 // updated=true означает установленную новую версию; false — отсутствие установки.
 // Не обещает атомарность нескольких переименований при аварийном отключении ОС.
+// Короткое имя резерва не зависит от длины имени исходного JSON.
 func replaceExisting(temporaryPath, targetPath string) (updated bool, err error) {
-	reserved, err := os.CreateTemp(filepath.Dir(targetPath), "."+filepath.Base(targetPath)+".backup-*")
+	reserved, err := os.CreateTemp(filepath.Dir(targetPath), ".dsl-validator.backup-*")
 	if err != nil {
 		return false, fmt.Errorf("не удалось зарезервировать путь для %q: %w", targetPath, err)
 	}
