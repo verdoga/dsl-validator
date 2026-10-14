@@ -3,12 +3,17 @@ package app
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/verdoga/dsl-validator/checkers"
 	"github.com/verdoga/dsl-validator/console"
+	"github.com/verdoga/dsl-validator/diagnostics"
+	"github.com/verdoga/dsl-validator/storage"
+	"github.com/verdoga/dsl-validator/validator"
 )
 
 func TestRunPrintsHelpOnceWithoutRequiringToolVersion(t *testing.T) {
@@ -62,19 +67,73 @@ func TestRunRejectsEmptyToolVersionWithoutChangingJSON(t *testing.T) {
 	runnerUnchanged(t, path, original)
 }
 
-func TestRunRejectsEmptyRegistryBeforeOpeningOrReportingJSON(t *testing.T) {
-	for _, kind := range []string{"empty directory", "directory with JSON", "single invalid JSON"} {
+func TestRunProcessesJSONAndPreservesHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "input.json")
+	if err := os.WriteFile(path, []byte(runValidJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		previous, _, err := storage.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validator.CheckModel(previous); err != nil {
+			t.Fatal(err)
+		}
+		code, output, errorOutput := runCaptured(t, []string{path}, "dev", "", "")
+		if code != 0 || errorOutput != "" {
+			t.Fatalf("Run = %d, stdout=%q, stderr=%q", code, output, errorOutput)
+		}
+		saved, _, err := storage.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validator.CheckModel(saved); err != nil {
+			t.Fatal(err)
+		}
+		if len(saved.Processing) != len(previous.Processing)+1 || len(saved.Diagnostics) != 0 {
+			t.Fatal("unexpected processing or diagnostic count")
+		}
+		current := saved.Processing[len(saved.Processing)-1]
+		if current.Tool != "dsl-validator" || current.Version == nil || *current.Version != "dev" || current.StartedAt == nil || current.DurationMs == nil || *current.DurationMs < 0 {
+			t.Fatalf("invalid processing entry: %+v", current)
+		}
+		want := runReportStart(t) + fmt.Sprintf("ОБРАБОТАН %q, сохранён: да, строк: 3, ошибок: 0, проблем: 0, рекомендаций: 0, время: %d мс\n", path, *current.DurationMs) +
+			"ИТОГО: всего: 1, обработано: 1, сбоев: 0, сохранено: 1, ошибок: 0, проблем: 0, рекомендаций: 0\n"
+		if output != want {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+		saved.Processing = saved.Processing[:len(previous.Processing)]
+		if processingSnapshot(t, saved) != processingSnapshot(t, previous) {
+			t.Fatal("document, lines or previous history changed")
+		}
+	}
+}
+
+func TestRunReportsEmptyDirectory(t *testing.T) {
+	root := t.TempDir()
+	code, output, errorOutput := runCaptured(t, []string{root}, "dev", "", "")
+	want := runReportStart(t) + "ИТОГО: всего: 0, обработано: 0, сбоев: 0, сохранено: 0, ошибок: 0, проблем: 0, рекомендаций: 0\n"
+	if code != 0 || output != want || errorOutput != "" {
+		t.Fatalf("Run = %d, stdout=%q, stderr=%q", code, output, errorOutput)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("unexpected files after empty run: %v, %v", entries, err)
+	}
+}
+
+func TestRunRejectsMalformedJSONAndStopsBeforeNextFile(t *testing.T) {
+	for _, kind := range []string{"directory with JSON", "single invalid JSON"} {
 		t.Run(kind, func(t *testing.T) {
 			root := t.TempDir()
 			path := root
-			files := map[string]string{}
-			if kind != "empty directory" {
-				files[filepath.Join(root, "broken.json")] = "{invalid JSON"
-				if kind == "single invalid JSON" {
-					path = filepath.Join(root, "broken.json")
-				} else {
-					files[filepath.Join(root, "valid.JSON")] = processingSnapshot(t, processingModel(t))
-				}
+			broken := filepath.Join(root, "broken.json")
+			files := map[string]string{broken: "{invalid JSON"}
+			if kind == "single invalid JSON" {
+				path = broken
+			} else {
+				files[filepath.Join(root, "valid.JSON")] = runValidJSON
 			}
 			for file, contents := range files {
 				if err := os.WriteFile(file, []byte(contents), 0600); err != nil {
@@ -82,7 +141,9 @@ func TestRunRejectsEmptyRegistryBeforeOpeningOrReportingJSON(t *testing.T) {
 				}
 			}
 			code, output, errorOutput := runCaptured(t, []string{path}, "dev", "", "")
-			if code != 1 || output != "" || errorOutput != "Ошибка: диагностики не зарегистрированы\n" {
+			want := runReportStart(t) + "ИТОГО: всего: 1, обработано: 0, сбоев: 1, сохранено: 0, ошибок: 0, проблем: 0, рекомендаций: 0\n"
+			prefix := fmt.Sprintf("СБОЙ %q, сохранён: нет, строк: нет данных, ошибок: 0, проблем: 0, рекомендаций: 0, время: ", broken)
+			if code != 1 || output != want || strings.Count(errorOutput, "\n") != 1 || !strings.HasPrefix(errorOutput, prefix) || !strings.Contains(errorOutput, "ожидался ровно один корректный JSON-объект") {
 				t.Fatalf("Run = %d, stdout=%q, stderr=%q", code, output, errorOutput)
 			}
 			for file, contents := range files {
@@ -109,7 +170,6 @@ func TestRunTreatsOutputFailuresAsTechnicalFailures(t *testing.T) {
 			{"arguments", nil, "dev", false},
 			{"source path", []string{filepath.Join(root, "missing.json")}, "dev", false},
 			{"configuration", []string{root}, "", false},
-			{"empty registry", []string{root}, "dev", false},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
 				stdoutMode, stderrMode := "", mode
@@ -122,8 +182,56 @@ func TestRunTreatsOutputFailuresAsTechnicalFailures(t *testing.T) {
 				}
 			})
 		}
+		t.Run(mode+"/report start", func(t *testing.T) {
+			code, output, errorOutput := runCaptured(t, []string{root}, "dev", mode, "")
+			if code != 1 || output != "" || !strings.HasPrefix(errorOutput, "Ошибка: ") || strings.Count(errorOutput, "\n") != 1 {
+				t.Fatalf("Run = %d, stdout=%q, stderr=%q", code, output, errorOutput)
+			}
+		})
+		t.Run(mode+"/file failure report", func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "broken.json")
+			if err := os.WriteFile(path, []byte("{"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			code, output, errorOutput := runCaptured(t, []string{path}, "dev", "", mode)
+			want := runReportStart(t) + "ИТОГО: всего: 1, обработано: 0, сбоев: 1, сохранено: 0, ошибок: 0, проблем: 0, рекомендаций: 0\n"
+			if code != 1 || output != want || errorOutput != "" {
+				t.Fatalf("Run = %d, stdout=%q, stderr=%q", code, output, errorOutput)
+			}
+			runnerUnchanged(t, path, "{")
+		})
 	}
 }
+
+// runReportStart задаёт ожидаемый счётчик штатного каталога без запуска Check.
+func runReportStart(t *testing.T) string {
+	t.Helper()
+	registry, err := diagnostics.NewRegistry(checkers.RegistrationCheckers())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("Зарегистрировано диагностик: %d\n", registry.Len())
+}
+
+// runValidJSON — полный документ с обычным текстом и историей разбора.
+const runValidJSON = `{
+  "formatVersion": "1.0",
+  "document": {
+    "dslVersion": "1.2", "fileName": "input.dsl", "filePath": null,
+    "encoding": "UTF-8", "hasBom": false, "lineCount": 3, "byteLength": null, "sha256": null, "hasErrors": false,
+    "metadata": {"documentId": null, "title": "Unit 1", "subtitle": null, "section": null, "order": null, "resourceDirs": []}
+  },
+  "processing": [{"id": "p1", "tool": "dsl-parser", "version": null, "startedAt": null, "durationMs": null}],
+  "lines": [
+    {"line": 1, "type": "tag", "nestingLevel": 0, "parentLine": null, "raw": "@dsl-version 1.2", "eol": "\n", "hasErrors": false,
+     "elements": [{"type": "tag", "raw": "@dsl-version", "value": "dsl-version", "start": 1, "end": 13, "errorIds": []}, {"type": "version", "raw": "1.2", "value": "1.2", "start": 14, "end": 17, "errorIds": []}]},
+    {"line": 2, "type": "heading", "nestingLevel": 0, "parentLine": null, "raw": "# Unit 1", "eol": "\n", "hasErrors": false,
+     "elements": [{"type": "heading-level", "raw": "#", "value": "1", "start": 1, "end": 2, "errorIds": []}, {"type": "title", "raw": "Unit 1", "value": "Unit 1", "start": 3, "end": 9, "errorIds": []}]},
+    {"line": 3, "type": "content", "nestingLevel": 1, "parentLine": 2, "raw": "Read this sentence.", "eol": "", "hasErrors": false,
+     "elements": [{"type": "content", "raw": "Read this sentence.", "value": "Read this sentence.", "start": 1, "end": 20, "errorIds": []}]}
+  ],
+  "diagnostics": []
+}`
 
 // runCaptured подменяет потоки только на время Run. Тесты с ним не параллельны;
 // временные файлы позволяют читать вывод без горутин и блокировки каналов.
