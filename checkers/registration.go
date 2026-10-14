@@ -16,5 +16,6 @@ import "github.com/verdoga/dsl-validator/diagnostics"
 func RegistrationCheckers() map[string]diagnostics.RegistrationFunc {
 	return map[string]diagnostics.RegistrationFunc{
 		"V001": registrationV001,
+		"V002": registrationV002,
 	}
 }
