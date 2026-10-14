@@ -12,14 +12,21 @@ import (
 
 func TestV001Registration(t *testing.T) {
 	registry := v001Registry(t)
-	if registry.Len() != 1 {
-		t.Fatalf("registered diagnostics = %d, want exactly V001", registry.Len())
-	}
 	definitions, err := registry.ForVersion("1.2")
-	if err != nil || len(definitions) != 1 {
+	if err != nil {
 		t.Fatalf("ForVersion(1.2) = %v, %v", definitions, err)
 	}
-	definition := definitions[0]
+	var definition diagnostics.Definition
+	matches := 0
+	for _, candidate := range definitions {
+		if candidate.Code == "V001" {
+			definition = candidate
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("V001 definitions = %d, want 1", matches)
+	}
 	if definition.Code != "V001" || definition.Severity != "warning" ||
 		definition.Message != "Несколько пробелов подряд." || definition.Scope != "line" ||
 		definition.Versions.Mode != diagnostics.VersionExact || definition.Versions.Version != "1.2" || definition.Check == nil {

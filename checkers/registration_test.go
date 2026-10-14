@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
+	dslversions "github.com/verdoga/dsl-validator/dsl-versions"
 )
 
 func TestRegistrationCheckers(t *testing.T) {
@@ -14,6 +15,11 @@ func TestRegistrationCheckers(t *testing.T) {
 		}
 		if len(registrations) == 0 {
 			t.Fatal("catalog must contain real diagnostics")
+		}
+		for name, registration := range registrations {
+			if name == "" || registration == nil {
+				t.Fatalf("invalid registration %q: missing name or function", name)
+			}
 		}
 	})
 
@@ -65,4 +71,110 @@ func TestRegistrationCheckers(t *testing.T) {
 			t.Fatal("registry must contain real diagnostics")
 		}
 	})
+}
+
+func TestRegistrationRegistryIndependence(t *testing.T) {
+	registrations := RegistrationCheckers()
+	first, err := diagnostics.NewRegistry(registrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := diagnostics.NewRegistry(registrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLen := first.Len()
+	if wantLen == 0 || second.Len() != wantLen {
+		t.Fatalf("registry lengths = %d, %d, want equal nonzero lengths", wantLen, second.Len())
+	}
+	want := make(map[dslversions.Version][]diagnostics.Definition)
+	for _, version := range dslversions.Supported() {
+		want[version] = append([]diagnostics.Definition(nil), registrationDefinitions(t, first, version)...)
+		assertRegistrationDefinitions(t, registrationDefinitions(t, second, version), want[version])
+	}
+
+	clear(registrations)
+	third, err := diagnostics.NewRegistry(RegistrationCheckers())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		registry *diagnostics.Registry
+	}{
+		{"first registry", first},
+		{"repeated construction", second},
+		{"fresh catalog", third},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.registry.Len() != wantLen {
+				t.Fatalf("registry length = %d, want %d", tc.registry.Len(), wantLen)
+			}
+			for _, version := range dslversions.Supported() {
+				t.Run(string(version), func(t *testing.T) {
+					got := registrationDefinitions(t, tc.registry, version)
+					assertRegistrationDefinitions(t, got, want[version])
+				})
+			}
+		})
+	}
+}
+
+func TestRegistrationVersionSelectionsAreIndependent(t *testing.T) {
+	registry, err := diagnostics.NewRegistry(RegistrationCheckers())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLen := registry.Len()
+	for _, version := range dslversions.Supported() {
+		t.Run(string(version), func(t *testing.T) {
+			first := registrationDefinitions(t, registry, version)
+			second := registrationDefinitions(t, registry, version)
+			// Снимок не должен разделять массив ни с одной проверяемой выборкой.
+			want := append([]diagnostics.Definition(nil), first...)
+			assertRegistrationDefinitions(t, second, want)
+			clear(first)
+			assertRegistrationDefinitions(t, second, want)
+			assertRegistrationDefinitions(t, registrationDefinitions(t, registry, version), want)
+			if registry.Len() != wantLen {
+				t.Fatalf("registry length = %d, want %d", registry.Len(), wantLen)
+			}
+		})
+	}
+}
+
+// registrationDefinitions проверяет выборку штатного реестра без привязки к числу диагностик.
+func registrationDefinitions(t *testing.T, registry *diagnostics.Registry, version dslversions.Version) []diagnostics.Definition {
+	t.Helper()
+	definitions, err := registry.ForVersion(version)
+	if err != nil {
+		t.Fatalf("ForVersion(%s): %v", version, err)
+	}
+	if len(definitions) > registry.Len() {
+		t.Fatalf("selection length = %d exceeds registry length = %d", len(definitions), registry.Len())
+	}
+	seen := make(map[diagnostics.Code]bool)
+	for _, definition := range definitions {
+		if definition.Code == "" || seen[definition.Code] || definition.Check == nil {
+			t.Fatalf("invalid or duplicate definition: %+v", definition)
+		}
+		seen[definition.Code] = true
+	}
+	return definitions
+}
+
+// assertRegistrationDefinitions сравнивает метаданные и порядок, не вызывая проверки диагностик.
+func assertRegistrationDefinitions(t *testing.T, got, want []diagnostics.Definition) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("definitions length = %d, want %d", len(got), len(want))
+	}
+	for i, definition := range got {
+		expected := want[i]
+		if definition.Code != expected.Code || definition.Severity != expected.Severity ||
+			definition.Message != expected.Message || definition.Scope != expected.Scope ||
+			definition.Versions != expected.Versions || definition.Check == nil {
+			t.Fatalf("definition %d = %+v, want %+v with nonnil Check", i, definition, expected)
+		}
+	}
 }
