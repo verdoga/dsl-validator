@@ -29,8 +29,7 @@ func New(output, errorOutput io.Writer) *Reporter {
 	return &Reporter{output: output, errorOutput: errorOutput}
 }
 
-// Start печатает положительное число зарегистрированных диагностик.
-// При пустом реестре app завершает запуск до создания Reporter.
+// Start печатает число зарегистрированных диагностик.
 func (r *Reporter) Start(registered int) error {
 	_, err := fmt.Fprintf(r.output, "Зарегистрировано диагностик: %d\n", registered)
 	return err

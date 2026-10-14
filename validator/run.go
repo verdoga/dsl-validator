@@ -41,7 +41,7 @@ func (e *CheckFailure) Unwrap() error {
 // При err!=nil result не меняется; app не сохраняет этот файл.
 // Любое число error/warning/recommendation не создаёт возвращаемую ошибку.
 // nil result либо пустая выборка даёт err без изменения result; штатный путь
-// app до Run отсекает пустой реестр, неподдерживаемую версию и пустую выборку.
+// Prepare до Run отсекает неподдерживаемую версию и пустую выборку.
 func Run(result *model.Result, checks []diagnostics.Definition, processingID string) error {
 	if result == nil {
 		return fmt.Errorf("модель отсутствует")
