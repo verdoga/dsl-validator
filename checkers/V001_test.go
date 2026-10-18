@@ -62,7 +62,7 @@ func TestV001TextSequences(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := v001Document(t, v001Text(t, tc.raw, 2, 1))
-			v001Run(t, result, "current", tc.want)
+			v001Run(t, result, "current", tc.want, 1)
 		})
 	}
 }
@@ -154,7 +154,7 @@ func TestV001RawAndStructure(t *testing.T) {
 		}, [][3]int{{3, 10, 12}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			v001Run(t, v001Document(t, tc.body...), "current", tc.want)
+			v001Run(t, v001Document(t, tc.body...), "current", tc.want, 1)
 		})
 	}
 }
@@ -164,7 +164,7 @@ func TestV001FirstAndLastLines(t *testing.T) {
 	result.Lines[0].Raw = "@dsl-version  1.2"
 	result.Lines[0].Elements[1] = v001Element(t, "version", "1.2", "1.2", 15, 18)
 	result.Lines[2].LineEnding = model.LineEndingNone
-	v001Run(t, result, "current", [][3]int{{1, 13, 15}, {3, 2, 4}})
+	v001Run(t, result, "current", [][3]int{{1, 13, 15}, {3, 2, 4}}, 1)
 }
 
 func TestV001Heading(t *testing.T) {
@@ -173,7 +173,7 @@ func TestV001Heading(t *testing.T) {
 	result.Lines[1].Elements[1] = v001Element(t, "title", "Unit  1", "Unit  1", 3, 10)
 	title := "Unit  1"
 	result.Document.Metadata.Title = &title
-	v001Run(t, result, "current", [][3]int{{2, 7, 9}})
+	v001Run(t, result, "current", [][3]int{{2, 7, 9}}, 1)
 }
 
 func TestV001LineEndings(t *testing.T) {
@@ -192,7 +192,7 @@ func TestV001LineEndings(t *testing.T) {
 			for i, eol := range tc.eols {
 				result.Lines[i].LineEnding = eol
 			}
-			v001Run(t, result, "current", [][3]int{{3, 5, 7}, {3, 11, 14}})
+			v001Run(t, result, "current", [][3]int{{3, 5, 7}, {3, 11, 14}}, 1)
 		})
 	}
 }
@@ -200,7 +200,7 @@ func TestV001LineEndings(t *testing.T) {
 func TestV001UnavailableLines(t *testing.T) {
 	// Это отсутствие доступных строк, а не пустой DSL-файл с выдуманным тегом.
 	// validator.checkLineSequence допускает nil LineCount и пустой Lines.
-	v001Run(t, v001UnavailableDocument(t, "1.2"), "current", nil)
+	v001Run(t, v001UnavailableDocument(t, "1.2"), "current", nil, 0)
 }
 
 func TestV001UnsupportedVersions(t *testing.T) {
@@ -223,13 +223,14 @@ func TestV001UnsupportedVersions(t *testing.T) {
 
 func TestV001RepeatedRunsPreserveHistory(t *testing.T) {
 	result := v001Document(t, v001Text(t, "Read  this   sentence.", 2, 1))
-	v001Run(t, result, "first", [][3]int{{3, 5, 7}, {3, 11, 14}})
-	v001Run(t, result, "second", [][3]int{{3, 5, 7}, {3, 11, 14}})
-	if len(result.Diagnostics) != 4 || len(result.Processing) != 3 {
+	v001Run(t, result, "first", [][3]int{{3, 5, 7}, {3, 11, 14}}, 1)
+	v001Run(t, result, "second", [][3]int{{3, 5, 7}, {3, 11, 14}}, 1)
+	// Каждый запуск добавляет две V001 и одну V037; история обоих сохраняется.
+	if len(result.Diagnostics) != 6 || len(result.Processing) != 3 {
 		t.Fatalf("after two runs: diagnostics=%d, processing=%d", len(result.Diagnostics), len(result.Processing))
 	}
 	// Новый документ после двух запусков не наследует накопленные срабатывания.
-	v001Run(t, v001Document(t, v001Text(t, "Read this sentence.", 2, 1)), "first", nil)
+	v001Run(t, v001Document(t, v001Text(t, "Read this sentence.", 2, 1)), "first", nil, 1)
 }
 
 // v001UnavailableDocument сохраняет известную версию при недоступном исходнике.
@@ -317,10 +318,13 @@ func v001Text(t *testing.T, text string, parent, depth int) model.Line {
 
 // v001Run проверяет штатный конвейер и явные тройки: строка, начало, конец.
 // Правая граница исключается. Проверяются только V001 текущего запуска;
-// прежние результаты, строки, флаги и ссылки должны сохраниться без изменений.
-func v001Run(t *testing.T, result *model.Result, processingID string, want [][3]int) {
+// прежние результаты, строки и ссылки должны сохраниться без изменений.
+// wantV037 задаёт точное число сопутствующих ошибок отсутствующего ID;
+// флаг документа проверяется отдельно, строки и прежняя история сохраняются.
+func v001Run(t *testing.T, result *model.Result, processingID string, want [][3]int, wantV037 int) {
 	t.Helper()
 	before := v001Snapshot(t, result)
+	oldDocumentError := result.Document.HasErrors
 	processingCount, diagnosticCount := len(result.Processing), len(result.Diagnostics)
 	checks, err := validator.Prepare(result, v001Registry(t))
 	if err != nil {
@@ -334,6 +338,7 @@ func v001Run(t *testing.T, result *model.Result, processingID string, want [][3]
 		t.Fatalf("Run: %v", err)
 	}
 	var got []model.Diagnostic
+	gotV037 := 0
 	seenIDs := make(map[string]bool)
 	for i, entry := range result.Diagnostics {
 		if entry.ID == "" || seenIDs[entry.ID] {
@@ -343,9 +348,20 @@ func v001Run(t *testing.T, result *model.Result, processingID string, want [][3]
 		if i >= diagnosticCount && entry.DiagnosticCode == "V001" && entry.Source != processingID {
 			t.Fatalf("new V001 has source %q, want %q", entry.Source, processingID)
 		}
+		if entry.DiagnosticCode == "V037" && entry.Source == processingID {
+			gotV037++
+			if entry.SeverityLevel != "error" || entry.DiagnosticScope != "document" ||
+				entry.Message != "В документе отсутствует @document-id." || entry.Location != nil ||
+				entry.Fatal || entry.RelatedLocations == nil || len(entry.RelatedLocations) != 0 {
+				t.Errorf("unexpected accompanying V037: %+v", entry)
+			}
+		}
 		if entry.DiagnosticCode == "V001" && entry.Source == processingID {
 			got = append(got, entry)
 		}
+	}
+	if gotV037 != wantV037 {
+		t.Fatalf("current V037 count = %d, want %d", gotV037, wantV037)
 	}
 	if len(got) != len(want) {
 		t.Fatalf("current V001 count = %d, want %d; diagnostics: %+v", len(got), len(want), got)
@@ -368,7 +384,11 @@ func v001Run(t *testing.T, result *model.Result, processingID string, want [][3]
 	if len(result.Processing) != processingCount+1 {
 		t.Fatal("unexpected processing count")
 	}
+	if result.Document.HasErrors != (oldDocumentError || wantV037 > 0) {
+		t.Errorf("document.hasErrors = %v, want %v", result.Document.HasErrors, oldDocumentError || wantV037 > 0)
+	}
 	previous := *result
+	previous.Document.HasErrors = oldDocumentError
 	previous.Processing = result.Processing[:processingCount]
 	previous.Diagnostics = result.Diagnostics[:diagnosticCount]
 	if v001Snapshot(t, &previous) != before {
