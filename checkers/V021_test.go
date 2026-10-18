@@ -251,8 +251,50 @@ func TestV021Placeholders(t *testing.T) {
 		v021Run(t, v021Block(t, "multifill",
 			v021Line(t, "Начало _____", "content", 3, 2, v021Element(t, "content", "Начало ", "Начало ", 1, 8), ordinary),
 			v021Line(t, "далее _____{x}", "content", 3, 2, v021Element(t, "content", "далее ", "далее ", 1, 7),
-				v021Element(t, "placeholder", "_____{x}", "x", 7, 15))), "current", [][4]int{{4, 1, 5, 15}})
+				v021Element(t, "placeholder", "_____{x}", "x", 7, 15))), "current", nil)
 	})
+}
+
+func TestV021IndependentRows(t *testing.T) {
+	for _, tc := range []struct {
+		name, tag, first, second string
+		want                     [][4]int
+	}{
+		{"parallel raw gaps", "text", "hello _____", "good morning _____", nil},
+		{"formatted parallel gaps", "text", "<em>hello _____</em>", "<u>good morning _____</u>", nil},
+		{"parallel raw answers", "multifill", "hello _____{hi}", "good morning _____{morning}", nil},
+		{"lettered raw answers", "multifill", "a. _____{the USA}", "b. _____{Spain}", nil},
+		{"colon markers", "text", "a: first", "b: second", nil},
+		{"space markers", "text", "a first", "b second", nil},
+		{"Unicode marker and NBSP", "text", "а\u00a0первое", "б\u00a0второе", nil},
+		{"tab marker", "text", "Начало", "a\tпункт", nil},
+		{"numeric list cannot start a paragraph pair", "text", "1. First item", "continuation", nil},
+		{"marker in first line breaks adjacency", "text", "a. First item", "continuation", nil},
+		{"formatting around marker", "text", "Начало", "<em>a</em>. пункт", nil},
+		{"several letters are not a marker", "text", "Начало", "ab. пункт", [][4]int{{4, 1, 5, 10}}},
+		{"colon later in word is not a marker", "text", "Начало", "word: text", [][4]int{{4, 1, 5, 11}}},
+		{"short prose still reports", "text", "Это начало", "одного предложения.", [][4]int{{4, 1, 5, 20}}},
+		{"single gap in prose still reports", "multifill", "Начало _____{ответ.}", "далее", [][4]int{{4, 1, 5, 6}}},
+		{"gap inside prose still reports", "multifill", "Это _____{часть} начала", "одного предложения.", [][4]int{{4, 1, 5, 20}}},
+		{"escaped gaps are literal", "text", `hello \_____`, `good morning \_____`, [][4]int{{4, 1, 5, 20}}},
+		{"wrong gap length is not a template", "text", "hello ____", "good morning ____", [][4]int{{4, 1, 5, 18}}},
+		{"key underscores are literal", "key", "hello _____", "good morning _____", [][4]int{{4, 1, 5, 19}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v021Run(t, v021Block(t, tc.tag, v021Text(t, tc.first, 3, 2), v021Text(t, tc.second, 3, 2)), "current", tc.want)
+		})
+	}
+	v021Run(t, v021Block(t, "text", v021Text(t, "Начало", 3, 2),
+		v021Text(t, "a. самостоятельный пункт", 3, 2), v021Text(t, "далее", 3, 2)), "current", nil)
+	v021Run(t, v021Block(t, "text", v021Text(t, "Начало", 3, 2),
+		v021Text(t, "hello _____", 3, 2), v021Line(t, "", "blank", 3, 2),
+		v021Text(t, "<br>", 3, 2), v021Text(t, "good morning _____", 3, 2),
+		v021Text(t, "good evening _____", 3, 2), v021Text(t, "далее", 3, 2)), "current", nil)
+	// Одиночные шаблоны в разных блоках не образуют общий список.
+	v021Run(t, v021Document(t, v021Open(t, "text", 2, 1),
+		v021Text(t, "hello _____", 3, 2), v021Close(t, 3, 2), v021Open(t, "text", 2, 1),
+		v021Text(t, "good morning _____", 6, 2), v021Text(t, "далее", 6, 2), v021Close(t, 6, 2)),
+		"current", [][4]int{{7, 1, 8, 6}})
 }
 
 func TestV021ContainerBoundaries(t *testing.T) {

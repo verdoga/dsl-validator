@@ -132,13 +132,13 @@ func TestV019RawAndStructure(t *testing.T) {
 			v019Line(t, "}", "block-end", 3, 2, v019Element(t, "block-close", "}", "}", 1, 2)),
 			v019Text(t, "Read this.", 2, 1),
 		}, []v019Expected{{4, 2, 5, "Символы: «t» (U+0074, Latin), «е» (U+0435, Cyrillic), «g» (U+0067, Latin)."}}},
-		// DSL 3.6: допустимые HTML-теги; V019 не делает их прозрачными.
-		{"HTML interrupts words", []model.Line{
+		// DSL 3.6: разрешённое форматирование не разрывает слово.
+		{"HTML inside mixed word", []model.Line{
 			v019Line(t, "@text {", "block-start", 2, 1,
 				v019Element(t, "tag", "@text", "text", 1, 6), v019Element(t, "block-open", "{", "{", 7, 8)),
 			v019Text(t, "сл<em>o</em>во", 3, 2),
 			v019Line(t, "}", "block-end", 3, 2, v019Element(t, "block-close", "}", "}", 1, 2)),
-		}, nil},
+		}, []v019Expected{{4, 1, 15, v019WantExample}}},
 		{"mixed word inside formatting", []model.Line{
 			v019Line(t, "@text {", "block-start", 2, 1,
 				v019Element(t, "tag", "@text", "text", 1, 6), v019Element(t, "block-open", "{", "{", 7, 8)),
@@ -166,6 +166,40 @@ func TestV019RawAndStructure(t *testing.T) {
 			v019Run(t, v019Document(t, tc.body...), "current", tc.want)
 		})
 	}
+}
+
+func TestV019FormattingWords(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want []v019Expected
+	}{
+		{"слoво", []v019Expected{{4, 1, 6, v019WantExample}}},
+		{"сл<em>o</em>во", []v019Expected{{4, 1, 15, v019WantExample}}},
+		{"сл<em>о</em>во", nil},
+		{"😀 <Em>a<strong>я</strong></eM>", []v019Expected{{4, 7, 17, v019WantAY}}},
+		{"a'<em>я</em>", []v019Expected{{4, 1, 8, v019WantAY}}},
+		{"a<em>\u0301я</em>", []v019Expected{{4, 1, 8, v019WantAY}}},
+		{`\\<em>a<u>я</u></em>`, []v019Expected{{4, 7, 12, v019WantAY}}},
+		{"word<em> </em>слово", nil},
+		{"a<em>1</em>я", nil},
+		{"a<em>,</em>я", nil},
+		{`a\<em>я</em>`, nil},
+		{`a<em\>я</em>`, nil},
+		{"a<foo>я</foo>", nil},
+		{"a<em x=y>я</em>", nil},
+		{"a<br>я", nil},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			v019Run(t, v020TextBlock(t, tc.raw), "current", tc.want)
+		})
+	}
+	v019Run(t, v021Block(t, "editor", v021Text(t, "сл<em>o</em>во", 3, 2)), "current", nil)
+	result := v020TextBlock(t, "a<em>я</em>")
+	result.Lines[3].Elements = []model.Element{
+		v019Element(t, "content", "a", "a", 1, 2),
+		v019Element(t, "content", "<em>я</em>", "<em>я</em>", 2, 12),
+	}
+	v019Run(t, result, "current", nil)
 }
 
 func TestV019PlaceholderAnswers(t *testing.T) {

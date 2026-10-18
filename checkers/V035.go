@@ -157,6 +157,27 @@ func v035FilledValue(line diagnostics.Line, kind string) bool {
 	return false
 }
 
+// v035FilledContent проверяет непустой текст строки, игнорируя U+0020 и U+0009.
+// Только непосредственное содержимое text обрабатывает разрешённые HTML-маркеры,
+// включая отдельный <br>. Парность HTML здесь не проверяется; литеральные
+// контексты и экранированные маркеры сохраняют исходное содержимое.
+func v035FilledContent(lines diagnostics.Lines, line diagnostics.Line) bool {
+	raw := []rune(line.Raw())
+	var formatting []bool
+	if parent, found := line.ParentLine(); found {
+		container, _ := lines.Line(parent)
+		if v035Tag(container) == "text" {
+			formatting = v016HTMLMarkers(line, raw)
+		}
+	}
+	for index, char := range raw {
+		if char != ' ' && char != '\t' && (len(formatting) == 0 || !formatting[index]) {
+			return true
+		}
+	}
+	return false
+}
+
 // v035Empty возвращает true только при доказанной пустоте. Непустое содержимое,
 // invalid/unparsed либо неоднозначные границы потомка возвращают false.
 func v035Empty(lines diagnostics.Lines, opening, closing int, ends map[int]int) bool {
@@ -184,7 +205,7 @@ func v035Empty(lines diagnostics.Lines, opening, closing int, ends map[int]int) 
 		}
 		switch line.Type() {
 		case "content":
-			if strings.Trim(line.Raw(), " \t") != "" {
+			if v035FilledContent(lines, line) {
 				return false
 			}
 		case "tag":

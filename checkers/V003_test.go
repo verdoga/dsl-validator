@@ -49,14 +49,17 @@ func TestV003Chains(t *testing.T) {
 		{"one dot", ".", nil},
 		{"two dots", ". .", nil},
 		{"no gaps", "...", nil},
-		{"four spaced dots", ". . . .", nil},
-		{"four dots with final gap", "... .", nil},
-		{"four dots with initial gap", ". ...", nil},
-		{"four dots with middle gap", ".. ..", nil},
-		{"five dots", ".. . ..", nil},
-		{"six dots are one chain", ". . .   . . .", nil},
+		{"four unspaced dots", "....", nil},
+		{"six unspaced dots", "......", nil},
+		{"four spaced dots", ". . . .", [][3]int{{3, 1, 8}}},
+		{"four dots with final gap", "... .", [][3]int{{3, 1, 6}}},
+		{"four dots with initial gap", ". ...", [][3]int{{3, 1, 6}}},
+		{"four dots with middle gap", ".. ..", [][3]int{{3, 1, 6}}},
+		{"five dots", ".. . ..", [][3]int{{3, 1, 8}}},
+		{"six dots are one chain", ". . .   . . .", [][3]int{{3, 1, 14}}},
 		{"punctuation separates chains", ". . .;.. .", [][3]int{{3, 1, 6}, {3, 7, 11}}},
-		{"long chain does not hide following chain", ". . . .; . . .", [][3]int{{3, 10, 15}}},
+		{"long chain does not hide following chain", ". . . .; . . .", [][3]int{{3, 1, 8}, {3, 10, 15}}},
+		{"long Unicode chain with outer spaces", "Я😀  .\t.\u00a0..  ", [][3]int{{3, 5, 11}}},
 		{"tab and space", ".\t. .", [][3]int{{3, 1, 6}}},
 		{"multiple spaces and tab", ".  .\t.", [][3]int{{3, 1, 7}}},
 		{"multiple tabs", ".\t\t..", [][3]int{{3, 1, 6}}},
@@ -327,6 +330,33 @@ func TestV003CoexistsWithOtherChecks(t *testing.T) {
 		}
 		if matches != 1 {
 			t.Errorf("current %s count = %d, want 1", tc.code, matches)
+		}
+	}
+}
+
+func TestV003LongChainAndPunctuationChecks(t *testing.T) {
+	result := v003Document(t, v003Text(t, ". . . . Word ,", 2, 1), v003Text(t, "....", 2, 1))
+	v003Run(t, result, "current", [][3]int{{3, 1, 8}})
+	for _, tc := range []struct {
+		code             diagnostics.Code
+		line, start, end int
+	}{
+		{"V017", 3, 13, 14},
+		{"V026", 4, 1, 5},
+	} {
+		count := 0
+		for _, entry := range result.Diagnostics {
+			if entry.Source != "current" || entry.DiagnosticCode != tc.code {
+				continue
+			}
+			count++
+			want := model.Location{Start: model.Position{Line: tc.line, Column: tc.start}, End: model.Position{Line: tc.line, Column: tc.end}}
+			if entry.Location == nil || *entry.Location != want {
+				t.Errorf("unexpected %s location: %+v, want %+v", tc.code, entry.Location, want)
+			}
+		}
+		if count != 1 {
+			t.Errorf("%s count = %d, want 1", tc.code, count)
 		}
 	}
 }

@@ -16,12 +16,22 @@ func TestV020TextBoundaries(t *testing.T) {
 		want                [][4]int
 	}{
 		{"example", "Это предло-", "жение.", [][4]int{{4, 5, 5, 6}}},
-		{"minimum two letters", "ab-", "cd", [][4]int{{4, 1, 5, 3}}},
+		{"two letters in each part", "ab-", "cd", [][4]int{{4, 1, 5, 3}}},
 		{"three letters", "abc-", "def", [][4]int{{4, 1, 5, 4}}},
-		{"first part too short", "a-", "bc", nil},
-		{"second part too short", "ab-", "c", nil},
-		{"first diacritic is not a letter", "a\u0301-", "bc", nil},
-		{"second diacritic is not a letter", "ab-", "c\u0301", nil},
+		{"short first part of about", "a-", "bout", [][4]int{{4, 1, 5, 5}}},
+		{"uppercase short first part", "A-", "bout", [][4]int{{4, 1, 5, 5}}},
+		{"one letter first part", "a-", "bc", [][4]int{{4, 1, 5, 3}}},
+		{"one letter second part", "ab-", "c", [][4]int{{4, 1, 5, 2}}},
+		{"first diacritic remains in range", "a\u0301-", "bc", [][4]int{{4, 1, 5, 3}}},
+		{"second diacritic remains in range", "ab-", "c\u0301", [][4]int{{4, 1, 5, 3}}},
+		{"two standalone letters", "x-", "y", nil},
+		{"diacritics do not lengthen two letters", "x\u0301-", "y\u0301", nil},
+		{"detached hyphen after letter", "a -", "bout", nil},
+		{"letter belongs to alphanumeric designation", "A1b-", "out", nil},
+		{"continuation is an alphanumeric designation", "ab-", "c1", nil},
+		{"Unicode digit before short part", "A١b-", "out", nil},
+		{"digit follows continuation diacritic", "ab-", "c\u03011", nil},
+		{"combining marks alone are not a part", "\u0301-", "bout", nil},
 		{"diacritics in ranges", "ab\u0301-", "cd\u0301", [][4]int{{4, 1, 5, 4}}},
 		{"leading combining mark is not a first letter", "ab-", "\u0301cd", nil},
 		{"edge spaces and tabs", "  ab- \t", " \tcd.", [][4]int{{4, 3, 5, 5}}},
@@ -47,7 +57,8 @@ func TestV020TextBoundaries(t *testing.T) {
 		{"digit ends continuation", "ab-", "cd12", [][4]int{{4, 1, 5, 3}}},
 		{"punctuation ends continuation", "ab-", "cd, ef", [][4]int{{4, 1, 5, 3}}},
 		{"punctuation starts continuation", "ab-", "(cd)", nil},
-		{"first word only", "ab-", "c def", nil},
+		{"first word only", "ab-", "c def", [][4]int{{4, 1, 5, 2}}},
+		{"later word does not lengthen continuation", "a-", "b cde", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v020Run(t, v020TextBlock(t, tc.first, tc.second), "current", tc.want)
@@ -156,6 +167,53 @@ func TestV020ContainersAndBarriers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			v020Run(t, v020Document(t, tc.body...), "current", tc.want)
 		})
+	}
+}
+
+func TestV020FormattingHyphenation(t *testing.T) {
+	for _, tc := range []struct {
+		first, second string
+		want          [][4]int
+	}{
+		{"inter-", "<em>national</em>", [][4]int{{4, 1, 5, 13}}},
+		{"<em>inter-</em>", "national", [][4]int{{4, 5, 5, 9}}},
+		{"<em>in</em>ter-", "na<u>tion</u>al", [][4]int{{4, 5, 5, 16}}},
+		{"Я😀 <EM>inter-</EM>", "\t<u>national</u>", [][4]int{{4, 8, 5, 13}}},
+		{"inter-", "<em>National</em>", nil},
+		{"<em>i-</em>", "national", [][4]int{{4, 5, 5, 9}}},
+		{"inter-", "<em>n</em>", [][4]int{{4, 1, 5, 6}}},
+		{"<em>a-</em>", "<u>bout</u>", [][4]int{{4, 5, 5, 8}}},
+		{"<em>x-</em>", "<u>y</u>", nil},
+		{"A1<em>b-</em>", "out", nil},
+		{"ab-", "<em>c</em>1", nil},
+		{"inter-", "<em>национальный</em>", nil},
+		{"inter–", "<em>national</em>", nil},
+		{"inter-", `<em\>national</em>`, nil},
+		{"inter-", `\<em>national</em>`, nil},
+		{"inter-", "<foo>national</foo>", nil},
+		{"inter-", "<em x=y>national</em>", nil},
+	} {
+		t.Run(tc.first+"/"+tc.second, func(t *testing.T) {
+			v020Run(t, v020TextBlock(t, tc.first, tc.second), "current", tc.want)
+		})
+	}
+	for _, barrier := range []string{"<br>", "<em></em>"} {
+		v020Run(t, v020TextBlock(t, "inter-", barrier, "<em>national</em>"), "current", nil)
+	}
+	v020Run(t, v021Block(t, "editor", v021Text(t, "inter-", 3, 2),
+		v021Text(t, "<em>national</em>", 3, 2)), "current", nil)
+	for _, technicalLine := range []int{3, 4} {
+		result := v020TextBlock(t, "<em>inter-</em>", "<em>national</em>")
+		word, end := "inter-", 11
+		if technicalLine == 4 {
+			word, end = "national", 13
+		}
+		result.Lines[technicalLine].Elements = []model.Element{
+			v020Element(t, "content", "<em>", "<em>", 1, 5),
+			v020Element(t, "source", word, word, 5, end),
+			v020Element(t, "content", "</em>", "</em>", end, end+5),
+		}
+		v020Run(t, result, "current", nil)
 	}
 }
 

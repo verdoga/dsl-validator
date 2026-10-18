@@ -44,14 +44,14 @@ func TestV017Punctuation(t *testing.T) {
 		{"period", "Wait .", [][3]int{{3, 5, 6}}},
 		{"question mark", "Wait ?", [][3]int{{3, 5, 6}}},
 		{"exclamation mark", "Wait !", [][3]int{{3, 5, 6}}},
-		{"ellipsis character", "Wait …", [][3]int{{3, 5, 6}}},
-		{"three contiguous dots", "Wait ...", [][3]int{{3, 5, 6}}},
+		{"standalone ellipsis character", "Wait …", nil},
+		{"standalone three contiguous dots", "Wait ...", nil},
 		{"four contiguous dots", "Wait ....", [][3]int{{3, 5, 6}}},
 		{"six contiguous dots", "Wait ......", [][3]int{{3, 5, 6}}},
 		{"two contiguous dots", "Wait ..", [][3]int{{3, 5, 6}}},
 		{"punctuation only", ",.?!…...", nil},
 		{"space after punctuation", "Wait! please", nil},
-		{"other signs", "Wait : next ;", nil},
+		{"colon and semicolon", "Wait : next ;", [][3]int{{3, 5, 6}, {3, 12, 13}}},
 		{"adjacent punctuation", "Wait ?!", [][3]int{{3, 5, 6}}},
 		{"separated punctuation", "Wait ? !", [][3]int{{3, 5, 6}, {3, 7, 8}}},
 		{"mixed contiguous punctuation", "Wait ...?!", [][3]int{{3, 5, 6}}},
@@ -64,6 +64,34 @@ func TestV017Punctuation(t *testing.T) {
 			v017Run(t, v017Document(t, v017Text(t, tc.raw, tc.raw, 2, 1)), "current", tc.want, 1)
 		})
 	}
+}
+
+func TestV017AnswerRepresentations(t *testing.T) {
+	for _, separate := range []bool{false, true} {
+		v017Run(t, v015AnswerDocument(t, "", "Word , next", "", separate), "current", [][3]int{{4, 11, 12}}, 1)
+		v017Run(t, v015AnswerDocument(t, "", "Word : next ;", "", separate), "current", [][3]int{{4, 11, 12}, {4, 18, 19}}, 1)
+		v017Run(t, v015AnswerDocument(t, " ", ",", "", separate), "current", nil, 1)
+		v017Run(t, v015AnswerDocument(t, "", "word ", ",", separate), "current", nil, 1)
+		v017Run(t, v015AnswerDocument(t, "", "Hi, I'm …", "Next", separate), "current", nil, 1)
+		v017Run(t, v015AnswerDocument(t, "Я😀 ", `a\} ,`, " !", separate), "current", [][3]int{{4, 13, 14}, {4, 16, 17}}, 1)
+		v017Run(t, v015AnswerDocument(t, "Wait ...", "x", "", separate), "current", [][3]int{{4, 5, 6}}, 1)
+		v017Run(t, v015AnswerDocument(t, "", "Word <em>,</em>", "", separate), "current", nil, 1)
+	}
+}
+
+func TestV017StandaloneEllipsis(t *testing.T) {
+	for _, raw := range []string{"This is …", "Hi, I'm …", "This is ...", "This is … next", "This is ... next", `"This is …"`, "(This is ...)", "This is <em>…</em>", "This is <em>...</em>", "This is .<em>.</em>.", "This is\u00a0…"} {
+		t.Run(raw, func(t *testing.T) {
+			v017Run(t, v020TextBlock(t, raw), "current", nil, 1)
+		})
+	}
+	for _, raw := range []string{"Wait …next", "Wait ...next", "Wait ....", "Wait ...?!", "Wait …!", "Wait ,", "Wait .", "Wait .."} {
+		t.Run(raw, func(t *testing.T) {
+			v017Run(t, v020TextBlock(t, raw), "current", [][3]int{{4, 5, 6}}, 1)
+		})
+	}
+	// Исключение многоточия не скрывает другое нарушение в той же строке.
+	v017Run(t, v020TextBlock(t, "Hi , I'm …"), "current", [][3]int{{4, 3, 4}}, 1)
 }
 
 func TestV017HorizontalSpaces(t *testing.T) {
@@ -156,6 +184,45 @@ func TestV017RawPositionsAndTextKinds(t *testing.T) {
 		v017NumberLines(t, result)
 		v017Run(t, result, "current", [][3]int{{2, 14, 15}}, 1)
 	})
+}
+
+func TestV017FormattingNeighbours(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want [][3]int
+	}{
+		{"Hello <em>,</em> world", [][3]int{{4, 6, 7}}},
+		{"Hello<em>,</em> world", nil},
+		{"Wait <em> </em>,", [][3]int{{4, 5, 6}, {4, 10, 11}}},
+		{"Я😀\u00a0<u><EM>!</EM></u>", [][3]int{{4, 3, 4}}},
+		{"Wait <em>:</em> Next <u>;</u>", [][3]int{{4, 5, 6}, {4, 21, 22}}},
+		{"Wait <em>...</em>", nil},
+		{". <em>.</em> .", [][3]int{{4, 2, 3}, {4, 13, 14}}},
+		{"Wait <em>. . .</em>", [][3]int{{4, 5, 6}}},
+		{`Hello \<em>,</em>`, nil},
+		{`Hello <em\>,</em>`, nil},
+		{"Hello <foo>,</foo>", nil},
+		{"Hello <em x=y>,</em>", nil},
+		{"Hello <br>,", nil},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			result := v020TextBlock(t, tc.raw)
+			v017Run(t, result, "current", tc.want, 1)
+			if tc.raw == ". <em>.</em> ." {
+				for _, entry := range result.Diagnostics {
+					if entry.DiagnosticCode == "V003" {
+						t.Fatal("V017 must cover these spaces independently of V003")
+					}
+				}
+			}
+		})
+	}
+	result := v020TextBlock(t, "Hello <em>,</em>")
+	result.Lines[3].Elements = []model.Element{
+		v017Element(t, "content", "Hello ", "Hello ", 1),
+		v017Element(t, "content", "<em>,</em>", "<em>,</em>", 7),
+	}
+	v017Run(t, result, "current", nil, 1)
 }
 
 func TestV017HTMLIsOrdinaryText(t *testing.T) {

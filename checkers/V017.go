@@ -19,56 +19,129 @@ func registrationV017(registry *diagnostics.Registry) error {
 	})
 }
 
-// checkV017 проверяет неизменённый Raw элементов content/title/name.
-// HTML не распознаётся; соседство ограничено одним элементом одной строки.
+// checkV017 проверяет content/title/name и внутренность ответов placeholder.
+// Разрешённое форматирование в text прозрачно при поиске соседей.
 // Отмечаются только пробелы в исходных Unicode-колонках с 1, конец исключается.
 func checkV017(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
+		raw := []rune(line.Raw())
+		_, answers := v015PlaceholderContext(lines, line)
+		formatting := v019Formatting(lines, line, raw)
 		for index := 0; index < line.ElementCount(); index++ {
 			element, _ := line.Element(index)
 			switch element.Type() {
-			case "content", "title", "name":
+			case "content", "title", "name", "placeholder":
 			default:
 				continue
 			}
-			raw := []rune(element.Raw())
-			for i := 0; i < len(raw); {
-				switch raw[i] {
-				case ',', '.', '?', '!', '…':
-				default:
-					i++
-					continue
+			for _, part := range v015TextParts(raw, element, answers) {
+				markers := formatting
+				if part.answer {
+					markers = nil // В ANSWER HTML не является форматированием.
 				}
-				start := i
-				for start > 0 && v017HorizontalSpace(raw[start-1]) {
-					start--
+				if err := v017CheckPart(raw, markers, part, number, findings); err != nil {
+					return err
 				}
-				if start < i {
-					if _, err := findings.Add(number, element.Start()+start, number, element.Start()+i, ""); err != nil {
-						return err
-					}
-				}
-				if raw[i] == '.' {
-					end, count, spaced := v017DotChain(raw, i)
-					if count >= 3 && spaced {
-						// Пробелы перед первой точкой уже проверены, внутренние
-						// пробелы всей максимальной цепочки исключаются.
-						i = end
-						continue
-					}
-					if !spaced {
-						// Цельное ... даёт одно срабатывание. В более длинной
-						// непрерывной серии также нет внутренних пробелов.
-						i = end
-						continue
-					}
-				}
-				i++
 			}
 		}
 	}
 	return nil
+}
+
+// v017CheckPart ищет пробелы в одном самостоятельном участке. Границы ответа
+// не участвуют в поиске соседей, исходные раздельные пробелы не объединяются.
+func v017CheckPart(raw []rune, formatting []bool, part v015TextPart, number int, findings diagnostics.Findings) error {
+	text, positions := v019Visible(raw, formatting, part.start, part.end)
+	var following rune
+	if !part.answer && part.end < len(raw) {
+		following = raw[part.end]
+	}
+	for i := 0; i < len(text); {
+		switch text[i] {
+		case ',', '.', '?', '!', '…', ':', ';':
+		default:
+			i++
+			continue
+		}
+		if end := v017StandaloneEllipsis(text, i, following); end > i {
+			i = end
+			continue
+		}
+		start := i
+		for start > 0 && v017HorizontalSpace(text[start-1]) {
+			start--
+		}
+		for start < i {
+			end := start + 1
+			for end < i && positions[end] == positions[end-1]+1 {
+				end++
+			}
+			if _, err := findings.Add(number, positions[start]+1, number, positions[end-1]+2, ""); err != nil {
+				return err
+			}
+			start = end
+		}
+		if text[i] == '.' {
+			// Исключение V003 относится к исходной цепочке: удаление
+			// HTML не должно создавать новую цепочку и скрывать пробелы.
+			end, count, spaced := v017DotChain(raw[:part.end], positions[i])
+			if count >= 3 && spaced || !spaced {
+				for i < len(text) && positions[i] < end {
+					i++
+				}
+				continue
+			}
+		}
+		i++
+	}
+	return nil
+}
+
+// v017StandaloneEllipsis возвращает конец отдельного … или ... после пробела.
+// Такой образец для продолжения неоднозначен и не требует предупреждения.
+// Возврат start означает обычную пунктуацию. Разнесённые точки, длинные серии
+// и примыкающая пунктуация исключение не получают. following сохраняет границу
+// внешнего текста; для самостоятельного конца ответа он равен нулю.
+func v017StandaloneEllipsis(text []rune, start int, following rune) int {
+	if start == 0 || !v017HorizontalSpace(text[start-1]) {
+		return start
+	}
+	end := start + 1
+	switch text[start] {
+	case '…':
+	case '.':
+		for end < len(text) && text[end] == '.' {
+			end++
+		}
+		if end-start != 3 {
+			return start
+		}
+	default:
+		return start
+	}
+	previous := start - 1
+	for previous >= 0 && v017HorizontalSpace(text[previous]) {
+		previous--
+	}
+	if previous >= 0 && (text[previous] == '.' || text[previous] == '…') {
+		return start
+	}
+	next := end
+	for next < len(text) && v017HorizontalSpace(text[next]) {
+		next++
+	}
+	if next < len(text) && (text[next] == '.' || text[next] == '…') {
+		return start
+	}
+	right := following
+	if end < len(text) {
+		right = text[end]
+	}
+	if right == 0 || v017HorizontalSpace(right) || unicode.In(right, unicode.Pe, unicode.Pf) || right == '\'' || right == '"' {
+		return end
+	}
+	return start
 }
 
 // v017DotChain находит максимальную цепочку точек и горизонтальных промежутков

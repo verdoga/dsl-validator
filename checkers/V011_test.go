@@ -113,19 +113,19 @@ func TestV011RawAndStructure(t *testing.T) {
 			v011Text(t, "—", 3, 2), v011Close(t, 3, 2),
 		}, [][3]int{{3, 7, 8}, {4, 1, 2}}},
 		// DSL 4.3, 4.4: служебный ответ представлен placeholder, а окружающий
-		// текст — двумя content. Выбор типов не расширяется на ответ.
+		// текст — двумя content. Ответ проверяется наравне с окружающим текстом.
 		{"text on both sides of placeholder", []model.Line{
 			v011Open(t, "multifill", 2, 1),
 			v011Line(t, "— _____{—} —", "content", 3, 2,
 				v011Element(t, "content", "— ", "— ", 1, 3),
 				v011Element(t, "placeholder", "_____{—}", "—", 3, 11),
 				v011Element(t, "content", " —", " —", 11, 13)), v011Close(t, 3, 2),
-		}, [][3]int{{4, 1, 2}, {4, 12, 13}}},
-		{"placeholder alone is not selected", []model.Line{
+		}, [][3]int{{4, 1, 2}, {4, 9, 10}, {4, 12, 13}}},
+		{"placeholder answer is selected", []model.Line{
 			v011Open(t, "multifill", 2, 1),
 			v011Line(t, "_____{—}", "content", 3, 2, v011Element(t, "placeholder", "_____{—}", "—", 1, 9)),
 			v011Close(t, 3, 2),
-		}, nil},
+		}, [][3]int{{4, 7, 8}}},
 		{"consecutive lines", []model.Line{v011Text(t, "—", 2, 1), v011Text(t, "—", 2, 1)},
 			[][3]int{{3, 1, 2}, {4, 1, 2}}},
 		{"block separator", []model.Line{
@@ -137,6 +137,15 @@ func TestV011RawAndStructure(t *testing.T) {
 			v011Run(t, v011Document(t, tc.body...), "current", tc.want)
 		})
 	}
+}
+
+func TestV011AnswerRepresentations(t *testing.T) {
+	for _, separate := range []bool{false, true} {
+		v011Run(t, v015AnswerDocument(t, "", "—", "", separate), "current", [][3]int{{4, 7, 8}})
+		v011Run(t, v015AnswerDocument(t, "Я😀 ", `a\}—`, " —", separate), "current", [][3]int{{4, 13, 14}, {4, 16, 17}})
+		v011Run(t, v015AnswerDocument(t, "", "a-b – c", "", separate), "current", nil)
+	}
+	v011Run(t, v021Block(t, "multifill", v021Text(t, "_____{—", 3, 2)), "current", [][3]int{{4, 7, 8}})
 }
 
 func TestV011HeadingNameAndPaths(t *testing.T) {

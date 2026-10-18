@@ -48,7 +48,11 @@ func checkV021(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if tag == "text" && strings.ToLower(strings.Trim(line.Raw(), " \t")) == "<br>" {
 			continue
 		}
-		visible := v021Visible(line, tag)
+		visible, gapRow := v021Visible(line, tag)
+		if v021ListMarker(visible) || gapRow && v021ParallelGap(lines, line, tag) {
+			previous = 0
+			continue
+		}
 		if previous != 0 && v021StartsLower(visible) {
 			if _, err := findings.Add(previous, 1, number, utf8.RuneCountInString(line.Raw())+1,
 				"Проверьте, не разделён ли один абзац на несколько строк"); err != nil {
@@ -61,6 +65,50 @@ func checkV021(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		}
 	}
 	return nil
+}
+
+// v021ListMarker отличает явный пункт от обычного слова по начальным рунам.
+// Для строчной буквы разделителем служит строго второй символ, для номера —
+// точка или скобка после цифр и следующий за ними пробельный символ.
+func v021ListMarker(text []rune) bool {
+	if len(text) < 2 {
+		return false
+	}
+	if unicode.IsLower(text[0]) && (text[1] == '.' || text[1] == ':' || unicode.IsSpace(text[1])) {
+		return true
+	}
+	i := 0
+	for i < len(text) && unicode.IsDigit(text[i]) {
+		i++
+	}
+	return i > 0 && i+1 < len(text) && (text[i] == '.' || text[i] == ')') && unicode.IsSpace(text[i+1])
+}
+
+// v021ParallelGap подтверждает самостоятельную учебную запись соседней
+// строкой того же вида «фраза + пропуск». Одиночный пропуск не скрывает прозу.
+// Просматриваются только ближайшие строки через допустимые blank и <br>.
+func v021ParallelGap(lines diagnostics.Lines, line diagnostics.Line, tag string) bool {
+	parent, _ := line.ParentLine()
+	for _, step := range [...]int{-1, 1} {
+		for number := line.Number() + step; number > 0 && number <= lines.Len(); number += step {
+			next, _ := lines.Line(number)
+			nextParent, _ := next.ParentLine()
+			if nextParent != parent {
+				break
+			}
+			if next.Type() == "blank" || next.Type() == "content" && tag == "text" &&
+				strings.EqualFold(strings.Trim(next.Raw(), " \t"), "<br>") {
+				continue
+			}
+			if next.Type() == "content" {
+				if _, gapRow := v021Visible(next, tag); gapRow {
+					return true
+				}
+			}
+			break
+		}
+	}
+	return false
 }
 
 // v021ContainerTag возвращает каноническое имя целевого непосредственного
@@ -87,16 +135,19 @@ func v021ContainerTag(lines diagnostics.Lines, parent int) string {
 // v021Visible получает текст для анализа, не изменяя исходную строку.
 // Сначала учитываются исходные границы и экранирование, затем прозрачные
 // маркеры. Результат снятия экранирования повторно как разметка не читается.
-// Ответы multifill исключаются по элементам штатной модели; обозначение
-// пропуска сохраняется. HTML-сущности не декодируются.
-func v021Visible(line diagnostics.Line, tag string) []rune {
+// Ответы multifill распознаются также внутри content по Raw. gapRow означает
+// фразу с настоящим конечным пропуском; экранированные подчёркивания не подходят.
+// Обозначение пропуска сохраняется; HTML-сущности не декодируются.
+func v021Visible(line diagnostics.Line, tag string) (text []rune, gapRow bool) {
 	raw := []rune(line.Raw())
 	placeholders := make(map[int]int)
-	if tag == "multifill" {
-		for index := 0; index < line.ElementCount(); index++ {
-			element, _ := line.Element(index)
-			if element.Type() == "placeholder" {
-				placeholders[element.Start()-1] = element.End() - 1
+	for index := 0; index < line.ElementCount(); index++ {
+		element, _ := line.Element(index)
+		if tag == "multifill" && element.Type() == "placeholder" {
+			placeholders[element.Start()-1] = element.End() - 1
+		} else if tag != "key" && element.Type() == "content" {
+			for _, gap := range v015Placeholders(raw, element.Start()-1, element.End()-1, tag == "multifill") {
+				placeholders[gap.start] = gap.end
 			}
 		}
 	}
@@ -108,9 +159,12 @@ func v021Visible(line diagnostics.Line, tag string) []rune {
 		end--
 	}
 	visible := make([]rune, 0, end-start)
+	gapStart, gapEnd := 0, -1
 	for index := start; index < end; {
 		if next, found := placeholders[index]; found {
+			gapStart = len(visible)
 			visible = append(visible, '_', '_', '_', '_', '_')
+			gapEnd = len(visible)
 			index = next
 			continue
 		}
@@ -146,7 +200,10 @@ func v021Visible(line diagnostics.Line, tag string) []rune {
 		visible = append(visible, raw[index])
 		index++
 	}
-	return []rune(strings.Trim(string(visible), " \t"))
+	// Только конечный пропуск после фразы образует учебный шаблон.
+	gapRow = gapEnd >= 0 && strings.Trim(string(visible[gapEnd:]), " \t") == "" &&
+		v021Unfinished([]rune(strings.Trim(string(visible[:gapStart]), " \t")))
+	return []rune(strings.Trim(string(visible), " \t")), gapRow
 }
 
 // v021HTMLLength возвращает длину поддерживаемого маркера либо ноль.

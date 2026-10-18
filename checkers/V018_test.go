@@ -3,6 +3,7 @@ package checkers
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 	"unicode/utf8"
 
@@ -44,9 +45,9 @@ func TestV018Text(t *testing.T) {
 		{"no punctuation", "Hello world", nil},
 		{"first character", ",А", [][3]int{{3, 1, 2}}},
 		{"multiple occurrences", "А,Б;В", [][3]int{{3, 2, 3}, {3, 4, 5}}},
-		{"separate terminal signs", "Что?!Да", [][3]int{{3, 4, 5}, {3, 5, 6}}},
-		{"three dots before text", "Wait...Next", [][3]int{{3, 5, 6}, {3, 6, 7}, {3, 7, 8}}},
-		{"three dots at end", "Wait...", [][3]int{{3, 5, 6}, {3, 6, 7}}},
+		{"terminal group before text", "Что?!Да", [][3]int{{3, 5, 6}}},
+		{"three dots before text", "Wait...Next", [][3]int{{3, 7, 8}}},
+		{"three dots at end", "Wait...", nil},
 		{"Unicode ellipsis is not checked", "А…Б", nil},
 		{"ASCII period between digits", "3.14", nil},
 		{"ASCII comma between digits", "3,14", nil},
@@ -65,8 +66,8 @@ func TestV018Text(t *testing.T) {
 		{"final period after decimal", "3.14.", nil},
 		{"Unicode columns", "Я😀,Б", [][3]int{{3, 3, 4}}},
 		{"combining mark is a column", "e\u0301,Б", [][3]int{{3, 3, 4}}},
-		{"closing quote is not skipped", "«Hi!» There", [][3]int{{3, 4, 5}}},
-		{"closing bracket is not skipped", "(А.) Б", [][3]int{{3, 3, 4}}},
+		{"space after closing quote", "«Hi!» There", nil},
+		{"space after closing bracket", "(А.) Б", nil},
 		{"opening quote after punctuation", `Hi,"there"`, [][3]int{{3, 3, 4}}},
 		{"abbreviations are not recognized", "e.g.Next", [][3]int{{3, 2, 3}, {3, 4, 5}}},
 		{"URL is not recognized", "https://x.y", [][3]int{{3, 6, 7}, {3, 10, 11}}},
@@ -78,6 +79,140 @@ func TestV018Text(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v018Run(t, v018Document(t, v018Text(t, tc.raw, 2, 1)), "current", tc.want)
+		})
+	}
+}
+
+func TestV018ClosingSequences(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		want      [][3]int
+	}{
+		{"parenthesized question", "(?)", nil},
+		{"text after bracket", "(?)Next", [][3]int{{3, 2, 3}}},
+		{"single quoted question", "'Is your name Sandy?'", nil},
+		{"text after single quote", "'Is your name Sandy?'Next", [][3]int{{3, 20, 21}}},
+		{"double quoted question", `"Hi?"`, nil},
+		{"text after double quote", `"Hi?"Next`, [][3]int{{3, 4, 5}}},
+		{"apostrophe inside quotation", "'We're students.'", nil},
+		{"apostrophe does not open quotation", "We're ready,'Next'", [][3]int{{3, 12, 13}}},
+		{"typographic quotes", "“Yes!” Next", nil},
+		{"missing space after typographic quotes", "“Yes!”Next", [][3]int{{3, 5, 6}}},
+		{"outer punctuation", "«Да!». Дальше", nil},
+		{"outer punctuation without space", "«Да!».Дальше", [][3]int{{3, 6, 7}}},
+		{"nested closures", `("Hi?!") Next`, nil},
+		{"nested closures without space", `("Hi?!")Next`, [][3]int{{3, 6, 7}}},
+		{"keep checking rest of line", "(?) Next,word!Again", [][3]int{{3, 9, 10}, {3, 14, 15}}},
+		{"opening bracket", "Hi,(Next)", [][3]int{{3, 3, 4}}},
+		{"opening quote", "Hi,'Next'", [][3]int{{3, 3, 4}}},
+		{"Unicode offset", "Я😀(?!).Дальше", [][3]int{{3, 7, 8}}},
+		{"unrecognized brace is not answer boundary", "Hi.}Next", [][3]int{{3, 3, 4}}},
+		{"numeric exception remains local", "3.14,Next 12:30;Next", [][3]int{{3, 5, 6}, {3, 16, 17}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v018Run(t, v018Document(t, v018Text(t, tc.raw, 2, 1)), "current", tc.want)
+		})
+	}
+}
+
+func TestV018MarkupBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, tag, raw string
+		want           [][3]int
+	}{
+		{"HTML closing", "text", "<em>Hello.</em>", nil},
+		{"HTML followed by text", "text", "<em>Hello.</em>Next", [][3]int{{4, 10, 11}}},
+		{"HTML followed by space", "text", "<em>Hello.</em> Next", nil},
+		{"nested HTML", "text", "<strong><em>Hi.</em></strong>", nil},
+		{"case insensitive HTML", "text", "<EM>Hi.</EM>", nil},
+		{"HTML between punctuation and quote", "text", `"<em>Hi!</em>" Next`, nil},
+		{"visible text after adjacent tags", "text", "<em>Hi.</em><u>Next</u>", [][3]int{{4, 7, 8}}},
+		{"visible space inside next tag", "text", "<em>Hi.</em><u> Next</u>", nil},
+		{"error inside HTML", "text", "<em>Hello,world.</em>", [][3]int{{4, 10, 11}}},
+		{"unknown closing tag", "text", "Hi.</foo>", [][3]int{{4, 3, 4}}},
+		{"escaped closing tag", "text", `Hi.\</em>`, [][3]int{{4, 3, 4}}},
+		{"HTML outside text", "editor", "<em>Hi.</em>", [][3]int{{4, 7, 8}}},
+		{"answer closing", "multifill", "_____{We're students.}", nil},
+		{"error inside answer", "multifill", "_____{Hello,world.}", [][3]int{{4, 12, 13}}},
+		{"answer does not join visible text", "multifill", "_____{Hi.}Next", nil},
+		{"error after answer", "multifill", "_____{Hi.}Next,word", [][3]int{{4, 15, 16}}},
+		{"several answers", "multifill", "_____{Hi.} _____{Go!}", nil},
+		{"quotes around gap", "multifill", "'Say _____{We're ready.} now.'", nil},
+		{"escaped brace is inside answer", "multifill", `_____{a\}Hi.Next.}`, [][3]int{{4, 12, 13}}},
+		{"paired slashes close answer", "multifill", `_____{a\\}Hi.Next`, [][3]int{{4, 13, 14}}},
+		{"ordinary gap is not answer", "multifill", "Hi._____", [][3]int{{4, 3, 4}}},
+		{"escaped answer is literal", "multifill", `\_____{Hi.}`, [][3]int{{4, 10, 11}}},
+		{"answer syntax outside multifill", "text", "_____{Hi.}", [][3]int{{4, 9, 10}}},
+		{"unclosed answer keeps checking", "multifill", "_____{Hi.Next", [][3]int{{4, 9, 10}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			open := "@" + tc.tag
+			v018Run(t, v018Document(t,
+				v018Line(t, open+" {", "block-start", 2, 1, v018Element(t, "tag", open, tc.tag, 1, len(open)+1),
+					v018Element(t, "block-open", "{", "{", len(open)+2, len(open)+3)),
+				v018Text(t, tc.raw, 3, 2),
+				v018Line(t, "}", "block-end", 3, 2, v018Element(t, "block-close", "}", "}", 1, 2))), "current", tc.want)
+		})
+	}
+}
+
+func TestV018AnswerRepresentations(t *testing.T) {
+	for _, separate := range []bool{false, true} {
+		v018Run(t, v015AnswerDocument(t, "", "Hello,world.", "", separate), "current", [][3]int{{4, 12, 13}})
+		v018Run(t, v015AnswerDocument(t, "", "We're students.", "Next", separate), "current", nil)
+		v018Run(t, v015AnswerDocument(t, "'Say ", "We're ready.", " now.'", separate), "current", nil)
+		v018Run(t, v015AnswerDocument(t, "'Say ", "'Yes!'", " now.'Next", separate), "current", [][3]int{{4, 23, 24}})
+		v018Run(t, v015AnswerDocument(t, "", "Hi.", "Next,word", separate), "current", [][3]int{{4, 15, 16}})
+		v018Run(t, v015AnswerDocument(t, "", `a\}Hi.Next.`, "", separate), "current", [][3]int{{4, 12, 13}})
+		v018Run(t, v015AnswerDocument(t, "", "1.5 12:30 1,5", "", separate), "current", nil)
+		v018Run(t, v015AnswerDocument(t, "", "Hi.", " _____{Go!}Next", separate), "current", nil)
+		v018Run(t, v015AnswerDocument(t, "", "<em>Hi.</em>", "", separate), "current", [][3]int{{4, 13, 14}})
+	}
+	// Обычный пропуск также не разрывает внешнюю цитату. Пробелы по краям
+	// content могут оставаться только в Raw строки, вне диапазонов элементов.
+	result := v021Block(t, "multifill", v021Text(t, "'Say _____ now.'", 3, 2))
+	gap := v018Element(t, "placeholder", "_____", "", 6, 11)
+	gap.Value = nil
+	result.Lines[3].Elements = []model.Element{
+		v018Element(t, "content", "'Say", "'Say", 1, 5), gap,
+		v018Element(t, "content", "now.'", "now.'", 12, 17),
+	}
+	v018Run(t, result, "current", nil)
+	// Модель допускает пустой элемент внутри занятого диапазона. Он не
+	// продолжает цитату и не должен приводить к срезу с обратными границами.
+	result = v015AnswerDocument(t, "", "Hi.", " next", true)
+	parts := result.Lines[3].Elements
+	result.Lines[3].Elements = []model.Element{parts[0], v018Element(t, "content", "", "", 7, 7), parts[1]}
+	v018Run(t, result, "current", nil)
+}
+
+func TestV018CoexistsWithV026(t *testing.T) {
+	for _, tc := range []struct {
+		raw            string
+		want18, want26 [][3]int
+	}{
+		{"Wait...", nil, nil},
+		{"Wait...Next", [][3]int{{3, 7, 8}}, nil},
+		{"Hello..", nil, [][3]int{{3, 6, 8}}},
+		{"Hello.. Next", nil, [][3]int{{3, 6, 8}}},
+		{"Hello..Next", [][3]int{{3, 7, 8}}, [][3]int{{3, 6, 8}}},
+		{"What?! Next", nil, nil},
+		{"What?!Next", [][3]int{{3, 6, 7}}, nil},
+		{"Hi!!??Next", [][3]int{{3, 6, 7}}, [][3]int{{3, 3, 5}, {3, 5, 7}}},
+		{"Review:200", [][3]int{{3, 7, 8}}, nil},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			result := v018Document(t, v018Text(t, tc.raw, 2, 1))
+			v018Run(t, result, "current", tc.want18)
+			var got [][3]int
+			for _, entry := range result.Diagnostics {
+				if entry.Source == "current" && entry.DiagnosticCode == "V026" {
+					got = append(got, [3]int{entry.Location.Start.Line, entry.Location.Start.Column, entry.Location.End.Column})
+				}
+			}
+			if !slices.Equal(got, tc.want26) {
+				t.Fatalf("V026 = %v, want %v", got, tc.want26)
+			}
 		})
 	}
 }

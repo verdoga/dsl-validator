@@ -168,6 +168,20 @@ func TestV033Variants(t *testing.T) {
 			v033TaskLine(t, "X", 7, 3), v033Text(t, "Write.", 8, 4),
 			v033Close(t, 3, 2),
 		}, nil},
+		{"same branch still reports", []model.Line{
+			v033Block(t, "variants", 2, 1), v033VariantLine(t, "A", 3, 2),
+			v033TaskLine(t, "x", 4, 3), v033TaskLine(t, "X", 4, 3), v033Close(t, 3, 2),
+		}, []v033Expected{{6, 7, 8, 5, 7, 8}}},
+		{"missing branch does not grant exemption", []model.Line{
+			v033Block(t, "variants", 2, 1), v033TaskLine(t, "x", 3, 2),
+			v033VariantLine(t, "A", 3, 2), v033TaskLine(t, "X", 5, 3), v033Close(t, 3, 2),
+		}, []v033Expected{{6, 7, 8, 4, 7, 8}}},
+		{"literal variant does not switch branch", []model.Line{
+			v033Block(t, "variants", 2, 1), v033VariantLine(t, "A", 3, 2),
+			v033TaskLine(t, "x", 4, 3), v033Block(t, "editor", 5, 4),
+			v033VariantLine(t, "B", 6, 5), v033Close(t, 6, 5),
+			v033TaskLine(t, "X", 4, 3), v033Close(t, 3, 2),
+		}, []v033Expected{{9, 7, 8, 5, 7, 8}}},
 		{"first matching ID is excluded but later one is eligible", []model.Line{
 			v033Block(t, "variants", 2, 1),
 			v033VariantLine(t, "A", 3, 2),
@@ -212,6 +226,24 @@ func TestV033Variants(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v033Run(t, v033Document(t, tc.body...), "current", tc.want)
+			t.Run("tasks share variants parent", func(t *testing.T) {
+				result := v033Document(t, tc.body...)
+				// Реальный вариант модели: @variant и @task имеют одного
+				// родителя; потомки задания сохраняют собственные связи.
+				for i := range result.Lines {
+					line := &result.Lines[i]
+					if line.ParentLine == nil {
+						continue
+					}
+					parent := result.Lines[*line.ParentLine-1]
+					if parent.LineType == "tag" && len(parent.Elements) > 0 &&
+						parent.Elements[0].Value != nil && *parent.Elements[0].Value == "variant" {
+						line.ParentLine = parent.ParentLine
+					}
+					line.NestingLevel = result.Lines[*line.ParentLine-1].NestingLevel + 1
+				}
+				v033Run(t, result, "current", tc.want)
+			})
 		})
 	}
 	t.Run("branch identity uses declaration line rather than name", func(t *testing.T) {

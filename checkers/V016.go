@@ -20,7 +20,8 @@ func registrationV016(registry *diagnostics.Registry) error {
 }
 
 // checkV016 проверяет весь Raw, включая служебные поля и unparsed.
-// Исключаются только разрешённые HTML-маркеры в content блока text.
+// Исключаются разрешённые HTML-маркеры в content блока text и структурные
+// угловые скобки разделённых ячеек в строках содержимого table.
 // Каждый символ отмечается в исходных Unicode-колонках [column,column+1).
 func checkV016(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
@@ -30,9 +31,22 @@ func checkV016(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if v016InsideText(lines, line) {
 			excluded = v016HTMLMarkers(line, raw)
 		}
+		if parent, found := line.ParentLine(); found && line.Type() == "content" {
+			block, _ := lines.Line(parent)
+			if block.Type() == "block-start" && v015Tag(block) == "table" {
+				table := v016TableMarkers(line, raw)
+				if excluded == nil {
+					excluded = table
+				} else {
+					for i := range table {
+						excluded[i] = excluded[i] || table[i]
+					}
+				}
+			}
+		}
 		for index, char := range raw {
 			switch char {
-			case '^', '&', '*', '`', '~', '<', '>', '=':
+			case '^', '&', '*', '`', '~', '<', '>':
 				if len(excluded) != 0 && excluded[index] {
 					continue
 				}
@@ -44,6 +58,70 @@ func checkV016(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		}
 	}
 	return nil
+}
+
+// v016TableMarkers отмечает только < и > допустимых разделённых ячеек.
+// Границы ищутся в Raw строки: парсер может сохранить части разными content.
+// Служебные элементы и unparsed исключений не получают. Экранированные знаки
+// остаются данными и проверяются обычным обходом V016.
+func v016TableMarkers(line diagnostics.Line, raw []rune) []bool {
+	excluded := make([]bool, len(raw))
+	literal := make([]bool, len(raw))
+	for index := 0; index < line.ElementCount(); index++ {
+		element, _ := line.Element(index)
+		if element.Type() != "content" {
+			for i := element.Start() - 1; i < element.End()-1; i++ {
+				literal[i] = true
+			}
+		}
+	}
+	cellStart := true
+	for i := 0; i < len(raw); {
+		if raw[i] == '|' && !v015Escaped(raw, i) {
+			cellStart = true
+			i++
+			continue
+		}
+		if cellStart && (raw[i] == ' ' || raw[i] == '\t') {
+			i++
+			continue
+		}
+		if !cellStart || raw[i] != '<' || v015Escaped(raw, i) {
+			cellStart = false
+			i++
+			continue
+		}
+		start, separator, valid := i, false, !literal[i]
+		i++
+		for i < len(raw) {
+			valid = valid && !literal[i]
+			if strings.ContainsRune("<>|", raw[i]) && !v015Escaped(raw, i) {
+				if raw[i] == '>' {
+					break
+				}
+				if raw[i] == '<' {
+					valid = false // Вложенные разделённые ячейки не поддерживаются.
+				}
+				if raw[i] == '|' {
+					separator = true
+				}
+			}
+			i++
+		}
+		if i == len(raw) {
+			break
+		}
+		next := i + 1
+		for next < len(raw) && (raw[next] == ' ' || raw[next] == '\t') {
+			next++
+		}
+		if valid && separator && (next == len(raw) || raw[next] == '|') {
+			excluded[start], excluded[i] = true, true
+		}
+		cellStart = false
+		i++
+	}
+	return excluded
 }
 
 // v016InsideText возвращает true, если среди предков есть блочный text.

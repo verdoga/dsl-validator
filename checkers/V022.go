@@ -47,9 +47,10 @@ func checkV022(lines diagnostics.Lines, findings diagnostics.Findings) error {
 
 // v022TokenDetail возвращает конкретизацию для подозрительного токена,
 // либо пустую строку. Диакритики принадлежат токену, но не меняют тип основы.
+// Прописные буквы сами по себе не исключают возможную OCR-подмену.
 func v022TokenDetail(token []rune) string {
 	letters, digits := 0, 0
-	allUpper, numericLetters := true, true
+	numericLetters := true
 	bases := make([]rune, 0, len(token))
 	for _, char := range token {
 		if unicode.IsMark(char) {
@@ -58,13 +59,12 @@ func v022TokenDetail(token []rune) string {
 		bases = append(bases, char)
 		if unicode.IsLetter(char) {
 			letters++
-			allUpper = allUpper && unicode.IsUpper(char)
 			numericLetters = numericLetters && strings.ContainsRune("OoОоIlІіZzЗзSsбBВg", char)
 		} else {
 			digits++
 		}
 	}
-	if letters < 2 || allUpper || (digits >= 2 && digits > letters && numericLetters) {
+	if letters < 2 || (digits >= 2 && digits > letters && numericLetters) {
 		return ""
 	}
 	var details []string

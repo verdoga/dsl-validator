@@ -55,7 +55,7 @@ func v003Excluded(kind string) bool {
 }
 
 // v003CheckSection проверяет участок [start,end) в исходных кодовых точках с 0.
-// Максимальная цепочка содержит ровно три точки и хотя бы один внутренний
+// Максимальная цепочка содержит не менее трёх точек и хотя бы один внутренний
 // промежуток из U+0009 или Zs. Внешние пробелы в срабатывание не входят.
 // Findings получает Unicode-колонки с 1 и исключающую правую границу.
 func v003CheckSection(raw []rune, start, end, number int, findings diagnostics.Findings) error {
@@ -78,7 +78,7 @@ func v003CheckSection(raw []rune, start, end, number int, findings diagnostics.F
 			}
 			index++
 		}
-		if dots == 3 && spaced {
+		if dots >= 3 && spaced {
 			if _, err := findings.Add(number, first+1, number, last+2, ""); err != nil {
 				return err
 			}

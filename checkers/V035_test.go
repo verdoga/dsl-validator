@@ -107,9 +107,9 @@ func TestV035BasicContent(t *testing.T) {
 			v035TestOpen(t, "note", "", 2, 1), v035TestLine(t, "", "blank", 3, 2), v035TestClose(t, 3, 2),
 			v035TestOpen(t, "hint", "", 2, 1), v035TestLine(t, "", "blank", 6, 2), v035TestClose(t, 6, 2),
 		}, [][4]int{{3, 1, 5, 2}, {6, 1, 8, 2}}},
-		{"HTML is nonempty source content", []model.Line{
+		{"visual blank line does not fill text", []model.Line{
 			v035TestOpen(t, "text", "", 2, 1), v035TestText(t, "<br>", 3, 2), v035TestClose(t, 3, 2),
-		}, nil},
+		}, [][4]int{{3, 1, 5, 2}}},
 		{"table row is nonempty source content", []model.Line{
 			v035TestOpen(t, "table", "", 2, 1), v035TestText(t, "|", 3, 2), v035TestClose(t, 3, 2),
 		}, nil},
@@ -126,6 +126,63 @@ func TestV035BasicContent(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestV035FormattingContent(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		empty     bool
+	}{
+		{"empty emphasis", "<em></em>", true},
+		{"nested formatting", "<strong><u> \t</u></strong>", true},
+		{"adjacent formatting", "<em></em> <u></u>", true},
+		{"marker case", "<EM> </eM>", true},
+		{"indented visual blank", " \t<BR> \t", true},
+		{"HTML balance is not checked here", "<em>", true},
+		{"visible text", "<em>Hello</em>", false},
+		{"text after empty formatting", "<em></em>Я", false},
+		{"nonbreaking space stays content", "<em>\u00a0</em>", false},
+		{"escaped markers stay literal", `\<em>\</em>`, false},
+		{"unknown markers are not stripped", "<span></span>", false},
+		{"attributes are not stripped", `<em class="x"></em>`, false},
+		{"unsupported br form", "<br/>", false},
+		{"inline br is not supported formatting", "<em></em><br>", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var want [][4]int
+			if tc.empty {
+				want = [][4]int{{3, 1, 5, 2}}
+			}
+			v035TestRun(t, v035TestDocument(t, v035TestOpen(t, "text", "", 2, 1),
+				v035TestText(t, tc.raw, 3, 2), v035TestClose(t, 3, 2)), "current", want)
+		})
+	}
+	for _, tag := range []string{"editor", "answer", "note", "table"} {
+		t.Run("literal context "+tag, func(t *testing.T) {
+			v035TestRun(t, v035TestDocument(t, v035TestOpen(t, tag, "", 2, 1),
+				v035TestText(t, "<em></em>", 3, 2), v035TestClose(t, 3, 2)), "current", nil)
+		})
+	}
+	for _, texts := range [][]string{{"<em></em>", "<br>"}, {"<em></em>", "<u>Read.</u>"}, {"Read.", "<em></em>"}} {
+		var want [][4]int
+		if texts[1] == "<br>" {
+			want = [][4]int{{3, 1, 6, 2}}
+		}
+		v035TestRun(t, v035TestDocument(t, v035TestOpen(t, "text", "", 2, 1),
+			v035TestText(t, texts[0], 3, 2), v035TestText(t, texts[1], 3, 2),
+			v035TestClose(t, 3, 2)), "multiple content lines", want)
+	}
+	v035TestRun(t, v035TestDocument(t, v035TestOpen(t, "fragment", "f", 2, 1),
+		v035TestOpen(t, "text", "", 3, 2), v035TestText(t, "<em></em>", 4, 3),
+		v035TestClose(t, 4, 3), v035TestClose(t, 3, 2)), "empty nested text",
+		[][4]int{{3, 1, 7, 2}, {4, 1, 6, 2}})
+	v035TestRun(t, v035TestDocument(t, v035TestOpen(t, "fragment", "f", 2, 1),
+		v035TestOpen(t, "text", "", 3, 2), v035TestText(t, "<em>Hello</em>", 4, 3),
+		v035TestClose(t, 4, 3), v035TestClose(t, 3, 2)), "filled nested text", nil)
+	// Даже ошибочное вложение editor в text не меняет литеральный контекст editor.
+	v035TestRun(t, v035TestDocument(t, v035TestOpen(t, "text", "", 2, 1),
+		v035TestOpen(t, "editor", "", 3, 2), v035TestText(t, "<em></em>", 4, 3),
+		v035TestClose(t, 4, 3), v035TestClose(t, 3, 2)), "literal child of text", [][4]int{{3, 1, 7, 2}})
 }
 
 func TestV035NestedContent(t *testing.T) {
