@@ -389,14 +389,10 @@ func v042Snapshot(t *testing.T, result *model.Result) string {
 
 // v042Run проверяет V042 через штатный каталог и конвейер. Диапазоны want
 // заданы независимо. Сохраняются исходные данные, история и ссылки элементов;
-// добавляются только Processing/Diagnostics и флаги ошибок строк и документа.
+// Общие флаги и ссылки учитывают полный каталог; исходник и история сохраняются.
 func v042Run(t *testing.T, result *model.Result, processingID string, want []v042Expected) {
 	t.Helper()
 	before := v042Snapshot(t, result)
-	var original model.Result
-	if err := json.Unmarshal([]byte(before), &original); err != nil {
-		t.Fatal(err)
-	}
 	processingCount, diagnosticCount := len(result.Processing), len(result.Diagnostics)
 	checks, err := validator.Prepare(result, v042Registry(t))
 	if err != nil {
@@ -438,63 +434,73 @@ func v042Run(t *testing.T, result *model.Result, processingID string, want []v04
 			t.Errorf("unexpected occurrence: %+v", entry)
 		}
 	}
-	// Срабатывания проверяемой диагностики заданы want. Ошибки других
-	// зарегистрированных кодов также устанавливают общие флаги модели.
-	otherDocumentError := false
-	otherLineErrors := make(map[int]bool)
-	for _, entry := range result.Diagnostics[diagnosticCount:] {
-		if entry.DiagnosticCode != "V042" && entry.SeverityLevel == "error" {
-			otherDocumentError = true
-			if entry.Location != nil {
-				otherLineErrors[entry.Location.Start.Line] = true
-			}
-		}
+	if len(result.Processing) != processingCount+1 || len(result.Diagnostics) < diagnosticCount {
+		t.Fatal("unexpected history lengths")
 	}
+	var expected model.Result
+	if err := json.Unmarshal([]byte(before), &expected); err != nil {
+		t.Fatal(err)
+	}
+	for _, occurrence := range want {
+		expected.Document.HasErrors = true
+		line := &expected.Lines[occurrence.line-1]
+		line.HasErrors = true
+	}
+	v042OtherFindings(t, &expected, result.Diagnostics[diagnosticCount:], processingID)
 	if err := validator.CheckModel(result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Document.HasErrors != (original.Document.HasErrors || len(want) > 0 || otherDocumentError) {
-		t.Error("unexpected document error flag")
+	previous := *result
+	previous.Processing, previous.Diagnostics = result.Processing[:processingCount], result.Diagnostics[:diagnosticCount]
+	if v042Snapshot(t, &previous) != v042Snapshot(t, &expected) {
+		t.Fatal("source, history, flags or element links differ from expected changes")
 	}
-	if len(result.Lines) != len(original.Lines) {
-		t.Fatal("line count changed")
+}
+
+// v042OtherFindings учитывает только разрешённые побочные изменения от других
+// диагностик полного каталога. Ожидания самой проверки заданы явно в Run.
+// Исходник, история, родители и связанные диапазоны не меняются.
+func v042OtherFindings(t *testing.T, expected *model.Result, entries []model.Diagnostic, source string) {
+	t.Helper()
+	order := make(map[string]int)
+	for i, entry := range append(append([]model.Diagnostic{}, expected.Diagnostics...), entries...) {
+		order[entry.ID] = i
 	}
-	for i, line := range result.Lines {
-		expectedFlag := original.Lines[i].HasErrors || otherLineErrors[i+1]
-		for _, expected := range want {
-			if expected.line == i+1 {
-				expectedFlag = true
+	for _, entry := range entries {
+		if entry.Source != source {
+			t.Fatalf("unexpected diagnostic source %q", entry.Source)
+		}
+		if entry.DiagnosticCode == "V042" {
+			continue
+		}
+		if entry.SeverityLevel == "error" {
+			expected.Document.HasErrors = true
+			if entry.Location != nil {
+				expected.Lines[entry.Location.Start.Line-1].HasErrors = true
 			}
 		}
-		if line.HasErrors != expectedFlag {
-			t.Errorf("line %d error flag = %v, want %v", i+1, line.HasErrors, expectedFlag)
+		if entry.DiagnosticScope != "element" {
+			continue
 		}
-		if len(line.Elements) != len(original.Lines[i].Elements) {
-			t.Fatalf("line %d element count changed", i+1)
+		if entry.Location == nil {
+			t.Fatal("element diagnostic has no location")
 		}
-		for j, element := range line.Elements {
-			expectedLinks := append([]string{}, original.Lines[i].Elements[j].ErrorIDs...)
-			if element.ErrorIDs == nil || !slices.Equal(element.ErrorIDs, expectedLinks) {
-				t.Errorf("line %d element %d links = %v, want %v", i+1, j, element.ErrorIDs, expectedLinks)
+		matched := false
+		for i := range expected.Lines[entry.Location.Start.Line-1].Elements {
+			element := &expected.Lines[entry.Location.Start.Line-1].Elements[i]
+			if element.Start == entry.Location.Start.Column && element.End == entry.Location.End.Column {
+				element.ErrorIDs = append(element.ErrorIDs, entry.ID)
+				matched = true
+				break
 			}
 		}
+		if !matched {
+			t.Fatal("element diagnostic does not identify an element")
+		}
 	}
-	if len(result.Processing) != processingCount+1 || len(result.Diagnostics) < diagnosticCount {
-		t.Fatal("lost history or unexpected processing")
-	}
-	// После отдельной проверки разрешённых изменений сравниваем весь остаток
-	// модели со снимком, не меняя проверяемый result.
-	var previous model.Result
-	if err := json.Unmarshal([]byte(v042Snapshot(t, result)), &previous); err != nil {
-		t.Fatal(err)
-	}
-	previous.Processing = previous.Processing[:processingCount]
-	previous.Diagnostics = previous.Diagnostics[:diagnosticCount]
-	previous.Document.HasErrors = original.Document.HasErrors
-	for i := range previous.Lines {
-		previous.Lines[i].HasErrors = original.Lines[i].HasErrors
-	}
-	if v042Snapshot(t, &previous) != before {
-		t.Fatal("source model or previous history changed")
+	for i := range expected.Lines {
+		for j := range expected.Lines[i].Elements {
+			slices.SortStableFunc(expected.Lines[i].Elements[j].ErrorIDs, func(a, b string) int { return order[a] - order[b] })
+		}
 	}
 }

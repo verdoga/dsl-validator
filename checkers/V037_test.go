@@ -2,6 +2,7 @@ package checkers
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"unicode/utf8"
 
@@ -308,7 +309,6 @@ func v037ParserError(t *testing.T, result *model.Result, line int, scope diagnos
 func v037Run(t *testing.T, result *model.Result, processingID string, want int, wantV038 ...model.Location) {
 	t.Helper()
 	before := v037Snapshot(t, result)
-	oldDocumentError := result.Document.HasErrors
 	processingCount, diagnosticCount := len(result.Processing), len(result.Diagnostics)
 	checks, err := validator.Prepare(result, v037Registry(t))
 	if err != nil {
@@ -361,34 +361,39 @@ func v037Run(t *testing.T, result *model.Result, processingID string, want int, 
 	if count != want {
 		t.Fatalf("V037 count = %d, want %d; diagnostics: %+v", count, want, result.Diagnostics)
 	}
-	if result.Document.HasErrors != (oldDocumentError || want > 0) {
-		t.Errorf("unexpected document.hasErrors: %v", result.Document.HasErrors)
-	}
 	if len(result.Processing) != processingCount+1 || len(result.Diagnostics) < diagnosticCount {
-		t.Fatal("changed processing count or lost diagnostic history")
+		t.Fatal("unexpected history lengths")
 	}
-	var previous model.Result
-	if err := json.Unmarshal([]byte(v037Snapshot(t, result)), &previous); err != nil {
+	var expected model.Result
+	if err := json.Unmarshal([]byte(before), &expected); err != nil {
 		t.Fatal(err)
 	}
-	for i := range previous.Lines {
-		for j := range previous.Lines[i].Elements {
-			element := &previous.Lines[i].Elements[j]
-			for _, d := range missing {
-				for k, id := range element.ErrorIDs {
-					if id == d.ID {
-						element.ErrorIDs = append(element.ErrorIDs[:k], element.ErrorIDs[k+1:]...)
-						break
-					}
-				}
+	expected.Document.HasErrors = expected.Document.HasErrors || want > 0
+	for i, location := range wantV038 {
+		expected.Document.HasErrors = true
+		line := &expected.Lines[location.Start.Line-1]
+		line.HasErrors = true
+		matched := false
+		for j := range line.Elements {
+			element := &line.Elements[j]
+			if element.Start == location.Start.Column && element.End == location.End.Column {
+				element.ErrorIDs = append(element.ErrorIDs, missing[i].ID)
+				matched = true
+				break
 			}
 		}
+		if !matched {
+			t.Fatal("expected V038 range does not identify an element")
+		}
 	}
-	previous.Document.HasErrors = oldDocumentError
-	previous.Processing = result.Processing[:processingCount]
-	previous.Diagnostics = result.Diagnostics[:diagnosticCount]
-	if v037Snapshot(t, &previous) != before {
-		t.Fatal("source, line flags, element links or previous history changed")
+	v037OtherFindings(t, &expected, result.Diagnostics[diagnosticCount:], processingID)
+	if err := validator.CheckModel(result); err != nil {
+		t.Fatal(err)
+	}
+	previous := *result
+	previous.Processing, previous.Diagnostics = result.Processing[:processingCount], result.Diagnostics[:diagnosticCount]
+	if v037Snapshot(t, &previous) != v037Snapshot(t, &expected) {
+		t.Fatal("source, history, flags or element links differ from expected changes")
 	}
 }
 
@@ -400,4 +405,52 @@ func v037Snapshot(t *testing.T, result *model.Result) string {
 		t.Fatal(err)
 	}
 	return string(encoded)
+}
+
+// v037OtherFindings учитывает только разрешённые побочные изменения от других
+// диагностик полного каталога. Ожидания самой проверки заданы явно в Run.
+// Исходник, история, родители и связанные диапазоны не меняются.
+func v037OtherFindings(t *testing.T, expected *model.Result, entries []model.Diagnostic, source string) {
+	t.Helper()
+	order := make(map[string]int)
+	for i, entry := range append(append([]model.Diagnostic{}, expected.Diagnostics...), entries...) {
+		order[entry.ID] = i
+	}
+	for _, entry := range entries {
+		if entry.Source != source {
+			t.Fatalf("unexpected diagnostic source %q", entry.Source)
+		}
+		if entry.DiagnosticCode == "V037" || entry.DiagnosticCode == "V038" {
+			continue
+		}
+		if entry.SeverityLevel == "error" {
+			expected.Document.HasErrors = true
+			if entry.Location != nil {
+				expected.Lines[entry.Location.Start.Line-1].HasErrors = true
+			}
+		}
+		if entry.DiagnosticScope != "element" {
+			continue
+		}
+		if entry.Location == nil {
+			t.Fatal("element diagnostic has no location")
+		}
+		matched := false
+		for i := range expected.Lines[entry.Location.Start.Line-1].Elements {
+			element := &expected.Lines[entry.Location.Start.Line-1].Elements[i]
+			if element.Start == entry.Location.Start.Column && element.End == entry.Location.End.Column {
+				element.ErrorIDs = append(element.ErrorIDs, entry.ID)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Fatal("element diagnostic does not identify an element")
+		}
+	}
+	for i := range expected.Lines {
+		for j := range expected.Lines[i].Elements {
+			slices.SortStableFunc(expected.Lines[i].Elements[j].ErrorIDs, func(a, b string) int { return order[a] - order[b] })
+		}
+	}
 }

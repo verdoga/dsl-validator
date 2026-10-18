@@ -3,6 +3,7 @@ package checkers
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"testing"
 	"unicode/utf8"
@@ -409,11 +410,6 @@ func v044Text(t *testing.T, raw string, parent, depth int) model.Line {
 func v044Run(t *testing.T, result *model.Result, processingID string, want []v044Expected) {
 	t.Helper()
 	before := v044Snapshot(t, result)
-	oldDocumentError := result.Document.HasErrors
-	oldErrors := make([]bool, len(result.Lines))
-	for i := range result.Lines {
-		oldErrors[i] = result.Lines[i].HasErrors
-	}
 	processingCount, diagnosticCount := len(result.Processing), len(result.Diagnostics)
 	checks, err := validator.Prepare(result, v044Registry(t))
 	if err != nil {
@@ -461,29 +457,22 @@ func v044Run(t *testing.T, result *model.Result, processingID string, want []v04
 	if len(result.Processing) != processingCount+1 || len(result.Diagnostics) < diagnosticCount {
 		t.Fatal("unexpected processing count or lost diagnostic history")
 	}
-	wantDocumentError := oldDocumentError || len(want) > 0
-	if result.Document.HasErrors != wantDocumentError {
-		t.Errorf("document error = %v, want %v", result.Document.HasErrors, wantDocumentError)
+	var expected model.Result
+	if err := json.Unmarshal([]byte(before), &expected); err != nil {
+		t.Fatal(err)
+	}
+	for _, occurrence := range want {
+		expected.Document.HasErrors = true
+		expected.Lines[occurrence.line-1].HasErrors = true
+	}
+	v044OtherFindings(t, &expected, result.Diagnostics[diagnosticCount:], processingID)
+	if err := validator.CheckModel(result); err != nil {
+		t.Fatal(err)
 	}
 	previous := *result
-	previous.Document.HasErrors = oldDocumentError
-	previous.Lines = append([]model.Line{}, result.Lines...)
-	for i := range result.Lines {
-		wantError := oldErrors[i]
-		for _, expected := range want {
-			if expected.line == i+1 {
-				wantError = true
-			}
-		}
-		if result.Lines[i].HasErrors != wantError {
-			t.Errorf("line %d error = %v, want %v", i+1, result.Lines[i].HasErrors, wantError)
-		}
-		previous.Lines[i].HasErrors = oldErrors[i]
-	}
-	previous.Processing = result.Processing[:processingCount]
-	previous.Diagnostics = result.Diagnostics[:diagnosticCount]
-	if v044Snapshot(t, &previous) != before {
-		t.Fatal("source, structure, error flags, element links or previous history changed")
+	previous.Processing, previous.Diagnostics = result.Processing[:processingCount], result.Diagnostics[:diagnosticCount]
+	if v044Snapshot(t, &previous) != v044Snapshot(t, &expected) {
+		t.Fatal("source, history, flags or element links differ from expected changes")
 	}
 }
 
@@ -495,4 +484,52 @@ func v044Snapshot(t *testing.T, result *model.Result) string {
 		t.Fatal(err)
 	}
 	return string(encoded)
+}
+
+// v044OtherFindings учитывает только разрешённые побочные изменения от других
+// диагностик полного каталога. Ожидания самой проверки заданы явно в Run.
+// Исходник, история, родители и связанные диапазоны не меняются.
+func v044OtherFindings(t *testing.T, expected *model.Result, entries []model.Diagnostic, source string) {
+	t.Helper()
+	order := make(map[string]int)
+	for i, entry := range append(append([]model.Diagnostic{}, expected.Diagnostics...), entries...) {
+		order[entry.ID] = i
+	}
+	for _, entry := range entries {
+		if entry.Source != source {
+			t.Fatalf("unexpected diagnostic source %q", entry.Source)
+		}
+		if entry.DiagnosticCode == "V044" {
+			continue
+		}
+		if entry.SeverityLevel == "error" {
+			expected.Document.HasErrors = true
+			if entry.Location != nil {
+				expected.Lines[entry.Location.Start.Line-1].HasErrors = true
+			}
+		}
+		if entry.DiagnosticScope != "element" {
+			continue
+		}
+		if entry.Location == nil {
+			t.Fatal("element diagnostic has no location")
+		}
+		matched := false
+		for i := range expected.Lines[entry.Location.Start.Line-1].Elements {
+			element := &expected.Lines[entry.Location.Start.Line-1].Elements[i]
+			if element.Start == entry.Location.Start.Column && element.End == entry.Location.End.Column {
+				element.ErrorIDs = append(element.ErrorIDs, entry.ID)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Fatal("element diagnostic does not identify an element")
+		}
+	}
+	for i := range expected.Lines {
+		for j := range expected.Lines[i].Elements {
+			slices.SortStableFunc(expected.Lines[i].Elements[j].ErrorIDs, func(a, b string) int { return order[a] - order[b] })
+		}
+	}
 }
