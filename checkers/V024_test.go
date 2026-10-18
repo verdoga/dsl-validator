@@ -373,7 +373,7 @@ func v024Text(t *testing.T, text string, parent, depth int) model.Line {
 }
 
 // v024Run проверяет текущие V024 через штатный конвейер и независимые ожидания.
-// Проверяет неизменность документа, строк, флагов, ссылок и прежней истории.
+// Проверяет исходные данные, ссылки и историю; флаги учитывают весь каталог.
 func v024Run(t *testing.T, result *model.Result, processingID string, want []v024Expected) {
 	t.Helper()
 	before := v024Snapshot(t, result)
@@ -427,7 +427,22 @@ func v024Run(t *testing.T, result *model.Result, processingID string, want []v02
 	if len(result.Processing) != processingCount+1 || len(result.Diagnostics) < diagnosticCount {
 		t.Fatal("unexpected processing count or lost previous diagnostics")
 	}
-	previous := *result
+	// Полный каталог может добавить error других кодов. Проверяем флаги
+	// штатной проверкой целостности, затем сравниваем исходные поля и историю.
+	if err := validator.CheckModel(result); err != nil {
+		t.Fatalf("model after full catalog: %v", err)
+	}
+	var original, previous model.Result
+	if err := json.Unmarshal([]byte(before), &original); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(v024Snapshot(t, result)), &previous); err != nil {
+		t.Fatal(err)
+	}
+	previous.Document.HasErrors = original.Document.HasErrors
+	for i := range previous.Lines {
+		previous.Lines[i].HasErrors = original.Lines[i].HasErrors
+	}
 	previous.Processing = result.Processing[:processingCount]
 	previous.Diagnostics = result.Diagnostics[:diagnosticCount]
 	if v024Snapshot(t, &previous) != before {

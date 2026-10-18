@@ -411,14 +411,29 @@ func v038Run(t *testing.T, result *model.Result, processingID string, want []v03
 			t.Errorf("unexpected occurrence: %+v", entry)
 		}
 	}
-	if result.Document.HasErrors != (original.Document.HasErrors || len(want) > 0) {
+	// Срабатывания проверяемой диагностики заданы want. Ошибки других
+	// зарегистрированных кодов также устанавливают общие флаги модели.
+	otherDocumentError := false
+	otherLineErrors := make(map[int]bool)
+	for _, entry := range result.Diagnostics[diagnosticCount:] {
+		if entry.DiagnosticCode != "V038" && entry.SeverityLevel == "error" {
+			otherDocumentError = true
+			if entry.Location != nil {
+				otherLineErrors[entry.Location.Start.Line] = true
+			}
+		}
+	}
+	if err := validator.CheckModel(result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Document.HasErrors != (original.Document.HasErrors || len(want) > 0 || otherDocumentError) {
 		t.Error("unexpected document error flag")
 	}
 	if len(result.Lines) != len(original.Lines) {
 		t.Fatal("line count changed")
 	}
 	for i, line := range result.Lines {
-		expectedFlag := original.Lines[i].HasErrors
+		expectedFlag := original.Lines[i].HasErrors || otherLineErrors[i+1]
 		for _, expected := range want {
 			if expected.line == i+1 {
 				expectedFlag = true

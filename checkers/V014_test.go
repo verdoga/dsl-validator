@@ -470,7 +470,22 @@ func v014Run(t *testing.T, result *model.Result, processingID string, want [][3]
 	if len(result.Processing) != processingCount+1 || len(result.Diagnostics) < diagnosticCount {
 		t.Fatal("unexpected processing count or lost previous diagnostics")
 	}
-	previous := *result
+	// Полный каталог может добавить error других кодов. Проверяем флаги
+	// штатной проверкой целостности, затем сравниваем исходные поля и историю.
+	if err := validator.CheckModel(result); err != nil {
+		t.Fatalf("model after full catalog: %v", err)
+	}
+	var original, previous model.Result
+	if err := json.Unmarshal([]byte(before), &original); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(v014Snapshot(t, result)), &previous); err != nil {
+		t.Fatal(err)
+	}
+	previous.Document.HasErrors = original.Document.HasErrors
+	for i := range previous.Lines {
+		previous.Lines[i].HasErrors = original.Lines[i].HasErrors
+	}
 	previous.Processing = result.Processing[:processingCount]
 	previous.Diagnostics = result.Diagnostics[:diagnosticCount]
 	if v014Snapshot(t, &previous) != before {
