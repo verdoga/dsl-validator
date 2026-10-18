@@ -100,7 +100,7 @@ func TestV037DeclarationWithOtherProblems(t *testing.T) {
 		result.Lines[1] = v037Line(t, "@document-id", "tag", 0, 0, v037Element(t, "tag", "@document-id", "document-id", 1))
 		v037NumberLines(t, result)
 		v037ParserError(t, result, 2, "line", 1, 13)
-		v037Run(t, result, "current", 0)
+		v037Run(t, result, "current", 0, model.Location{Start: model.Position{Line: 2, Column: 1}, End: model.Position{Line: 2, Column: 13}})
 	})
 	t.Run("unparsed argument with recognized tag", func(t *testing.T) {
 		result := v037Reference(t, "@document-id")
@@ -305,7 +305,7 @@ func v037ParserError(t *testing.T, result *model.Result, line int, scope diagnos
 // v037Run проверяет только V037 текущего запуска, выполняя весь штатный конвейер.
 // want задаёт явное число срабатываний. В ситуациях с ошибочным аргументом его
 // строка уже отмечена ошибкой парсера, поэтому новые ошибки V032 не меняют флаги.
-func v037Run(t *testing.T, result *model.Result, processingID string, want int) {
+func v037Run(t *testing.T, result *model.Result, processingID string, want int, wantV038 ...model.Location) {
 	t.Helper()
 	before := v037Snapshot(t, result)
 	oldDocumentError := result.Document.HasErrors
@@ -339,6 +339,25 @@ func v037Run(t *testing.T, result *model.Result, processingID string, want int) 
 			t.Errorf("unexpected V037 occurrence: %+v", d)
 		}
 	}
+	// Пустое объявление удовлетворяет V037, но добавляет V038 на tag.
+	// Диапазоны и число сопутствующих V038 заданы явно вызывающим тестом.
+	var missing []model.Diagnostic
+	for _, d := range result.Diagnostics[diagnosticCount:] {
+		if d.DiagnosticCode == "V038" {
+			missing = append(missing, d)
+		}
+	}
+	if len(missing) != len(wantV038) {
+		t.Fatalf("V038 count = %d, want %d", len(missing), len(wantV038))
+	}
+	for i, d := range missing {
+		if d.Location == nil || *d.Location != wantV038[i] || d.Source != processingID || d.SeverityLevel != "error" || d.DiagnosticScope != "element" || d.Message != "У @document-id отсутствует идентификатор." || d.Fatal || len(d.RelatedLocations) != 0 {
+			t.Fatalf("unexpected accompanying V038: %+v", d)
+		}
+	}
+	if err := validator.CheckModel(result); err != nil {
+		t.Fatal(err)
+	}
 	if count != want {
 		t.Fatalf("V037 count = %d, want %d; diagnostics: %+v", count, want, result.Diagnostics)
 	}
@@ -348,7 +367,23 @@ func v037Run(t *testing.T, result *model.Result, processingID string, want int) 
 	if len(result.Processing) != processingCount+1 || len(result.Diagnostics) < diagnosticCount {
 		t.Fatal("changed processing count or lost diagnostic history")
 	}
-	previous := *result
+	var previous model.Result
+	if err := json.Unmarshal([]byte(v037Snapshot(t, result)), &previous); err != nil {
+		t.Fatal(err)
+	}
+	for i := range previous.Lines {
+		for j := range previous.Lines[i].Elements {
+			element := &previous.Lines[i].Elements[j]
+			for _, d := range missing {
+				for k, id := range element.ErrorIDs {
+					if id == d.ID {
+						element.ErrorIDs = append(element.ErrorIDs[:k], element.ErrorIDs[k+1:]...)
+						break
+					}
+				}
+			}
+		}
+	}
 	previous.Document.HasErrors = oldDocumentError
 	previous.Processing = result.Processing[:processingCount]
 	previous.Diagnostics = result.Diagnostics[:diagnosticCount]
