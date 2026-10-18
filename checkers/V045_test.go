@@ -2,6 +2,7 @@ package checkers
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"unicode/utf8"
 
@@ -21,7 +22,7 @@ func TestV045Registration(t *testing.T) {
 			continue
 		}
 		matches++
-		if definition.Severity != "error" || definition.Scope != "element" ||
+		if definition.Severity != "warning" || definition.Scope != "element" ||
 			definition.Message != "Путь к каталогу ресурсов указан повторно." || definition.Check == nil ||
 			definition.Versions != (diagnostics.VersionRule{Mode: diagnostics.VersionExact, Version: "1.2"}) {
 			t.Errorf("unexpected definition: %+v", definition)
@@ -167,6 +168,42 @@ func TestV045ExcludedAndMalformedPaths(t *testing.T) {
 				v045TestElement(t, "source", "Audio", "Audio", 14, 19)))
 		v045TestRun(t, result, "current", nil)
 	})
+}
+
+func TestV045WarningAndErrorFlags(t *testing.T) {
+	for _, priorError := range []bool{false, true} {
+		t.Run(fmt.Sprint("prior error ", priorError), func(t *testing.T) {
+			result := v045TestDocument(t, []model.Line{
+				v045TestSingle(t, "Audio", "Audio"), v045TestSingle(t, "Audio", "Audio"),
+				v045TestLine(t, "@document-id unit1", "tag", 0, 0,
+					v045TestElement(t, "tag", "@document-id", "document-id", 1, 13),
+					v045TestElement(t, "identifier", "unit1", "unit1", 14, 19)),
+			})
+			id := "unit1"
+			result.Document.Metadata.DocumentID = &id
+			if priorError {
+				v045TestParserError(t, result, "p1", 2, 15, 20)
+			}
+			v045TestRun(t, result, "current", [][6]int{{3, 15, 20, 2, 15, 20}})
+			if result.Document.HasErrors != priorError || result.Lines[1].HasErrors != priorError || result.Lines[2].HasErrors {
+				t.Fatalf("warning changed error flags: document=%v, first=%v, duplicate=%v; diagnostics=%+v", result.Document.HasErrors, result.Lines[1].HasErrors, result.Lines[2].HasErrors, result.Diagnostics)
+			}
+			// Обратная ссылка ScopeElement сохраняется и у предупреждения.
+			ids := result.Lines[2].Elements[1].ErrorIDs
+			if len(ids) != 1 {
+				t.Fatalf("duplicate element links = %v, want exactly one warning", ids)
+			}
+			found := false
+			for _, entry := range result.Diagnostics {
+				if entry.ID == ids[0] && entry.DiagnosticCode == "V045" && entry.SeverityLevel == "warning" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("duplicate element does not link to V045 warning")
+			}
+		})
+	}
 }
 
 func TestV045EndingsAndHistory(t *testing.T) {
@@ -337,7 +374,7 @@ func v045TestRun(t *testing.T, result *model.Result, processingID string, want [
 		location := model.Location{Start: model.Position{Line: position[0], Column: position[1]}, End: model.Position{Line: position[0], Column: position[2]}}
 		related := model.Location{Start: model.Position{Line: position[3], Column: position[4]}, End: model.Position{Line: position[3], Column: position[5]}}
 		if entry.Location == nil || *entry.Location != location || len(entry.RelatedLocations) != 1 || entry.RelatedLocations[0] != related ||
-			entry.ID == "" || entry.Source != processingID || entry.SeverityLevel != "error" || entry.DiagnosticScope != "element" || entry.Fatal ||
+			entry.ID == "" || entry.Source != processingID || entry.SeverityLevel != "warning" || entry.DiagnosticScope != "element" || entry.Fatal ||
 			entry.Message != "Путь к каталогу ресурсов указан повторно." {
 			t.Fatalf("occurrence %d = %+v, want location %+v, related %+v and exact V045 metadata", i, entry, location, related)
 		}

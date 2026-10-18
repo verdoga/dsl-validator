@@ -19,19 +19,23 @@ func registrationV020(registry *diagnostics.Registry) error {
 }
 
 // checkV020 проверяет каждую границу отдельно. Между частями разрешены только
-// blank того же непосредственного родителя. Raw не преобразуется; Unicode-
+// blank того же непосредственного родителя. Форматирование text прозрачно,
+// но диапазоны и исключённые элементы проверяются по исходному Raw. Unicode-
 // колонки начинаются с 1, конец основного диапазона исключается.
+// Две однобуквенные части неоднозначны и не дают предупреждения.
 func checkV020(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
 		if line.Type() != "content" {
 			continue
 		}
-		first := []rune(line.Raw())
+		raw := []rune(line.Raw())
+		first, positions := v019Visible(raw, v019Formatting(lines, line, raw), 0, len(raw))
 		start, end, found := v020Tail(first)
-		if !found || v020Excluded(line, start, end+1) {
+		if !found || v020Excluded(line, positions[start], positions[end]+1) {
 			continue
 		}
+		firstLetters := v020LetterCount(first[start:end])
 		for next := number + 1; next <= lines.Len(); next++ {
 			continuation, _ := lines.Line(next)
 			if !v020SameParent(line, continuation) {
@@ -43,12 +47,14 @@ func checkV020(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			if continuation.Type() != "content" {
 				break
 			}
-			second := []rune(continuation.Raw())
+			raw := []rune(continuation.Raw())
+			second, secondPositions := v019Visible(raw, v019Formatting(lines, continuation, raw), 0, len(raw))
 			secondStart, secondEnd, found := v020Head(second)
-			if found && !v020Excluded(continuation, secondStart, secondEnd) &&
+			if found && firstLetters+v020LetterCount(second[secondStart:secondEnd]) >= 3 &&
+				!v020Excluded(continuation, secondPositions[secondStart], secondPositions[secondEnd-1]+1) &&
 				v020SameScript(first[start], second[secondStart]) {
-				if _, err := findings.Add(line.Number(), start+1,
-					continuation.Number(), secondEnd+1, ""); err != nil {
+				if _, err := findings.Add(line.Number(), positions[start]+1,
+					continuation.Number(), secondPositions[secondEnd-1]+2, ""); err != nil {
 					return err
 				}
 			}
@@ -59,7 +65,8 @@ func checkV020(lines diagnostics.Lines, findings diagnostics.Findings) error {
 }
 
 // v020Tail возвращает полуоткрытый диапазон буквенной части перед конечным
-// U+002D в индексах кодовых точек. found=true означает минимум две буквы.
+// U+002D в индексах кодовых точек. found=true означает хотя бы одну букву;
+// однобуквенный хвост буквенно-цифрового обозначения не подходит.
 func v020Tail(raw []rune) (start, end int, found bool) {
 	end = len(raw)
 	for end > 0 && (raw[end-1] == ' ' || raw[end-1] == '\t') {
@@ -77,11 +84,13 @@ func v020Tail(raw []rune) (start, end int, found bool) {
 	for start < end && !unicode.IsLetter(raw[start]) {
 		start++
 	}
-	return start, end, v020LetterCount(raw[start:end]) >= 2
+	letters := v020LetterCount(raw[start:end])
+	return start, end, letters > 0 && (letters > 1 || start == 0 || !unicode.IsDigit(raw[start-1]))
 }
 
 // v020Head возвращает диапазон первого слова после крайних U+0020 и табуляций.
-// found=true означает строчную первую букву и не менее двух букв в слове.
+// found=true означает строчную первую букву. Однобуквенное начало
+// буквенно-цифрового обозначения не подходит.
 func v020Head(raw []rune) (start, end int, found bool) {
 	for start < len(raw) && (raw[start] == ' ' || raw[start] == '\t') {
 		start++
@@ -93,7 +102,7 @@ func v020Head(raw []rune) (start, end int, found bool) {
 	for end < len(raw) && v020WordRune(raw[end]) {
 		end++
 	}
-	return start, end, v020LetterCount(raw[start:end]) >= 2
+	return start, end, v020LetterCount(raw[start:end]) > 1 || end == len(raw) || !unicode.IsDigit(raw[end])
 }
 
 // v020WordRune допускает букву или комбинируемую диакритику Unicode.

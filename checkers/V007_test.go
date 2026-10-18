@@ -84,6 +84,49 @@ func TestV007Text(t *testing.T) {
 	}
 }
 
+func TestV007ListMarkers(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		want      []v007Expected
+	}{
+		{"numeric marker", "1) Read the text.", nil},
+		{"multi digit marker", "123) Read (carefully).", nil},
+		{"letter marker", "a) Read (carefully).", nil},
+		{"uppercase Cyrillic marker", "Б) Прочитайте.", nil},
+		{"indented marker", " \t12)\tRead.", nil},
+		{"Unicode numeric marker", "١٢) Read.", nil},
+		{"unclosed parenthesis after marker", "1) Read (carefully.", []v007Expected{{3, 9, 10, v007OpenDetail}}},
+		{"extra closing after marker", "a) Read).", []v007Expected{{3, 8, 9, v007CloseDetail}}},
+		{"normal pair", "(1) Read.", nil},
+		{"word is not a marker", "word) Read.", []v007Expected{{3, 5, 6, v007CloseDetail}}},
+		{"missing separator", "a)Read.", []v007Expected{{3, 2, 3, v007CloseDetail}}},
+		{"missing item text", "a) \t", []v007Expected{{3, 2, 3, v007CloseDetail}}},
+		{"middle of text", "Read 1) carefully.", []v007Expected{{3, 7, 8, v007CloseDetail}}},
+		{"escaped closing is not a marker", `a\) Read.`, []v007Expected{{3, 3, 4, v007CloseDetail}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v007Run(t, v007Document(v007Text(tc.raw, 2, 1)), "current", tc.want)
+		})
+	}
+	v007Run(t, v007Document(v007Line("@note 1) Read (carefully.", "tag", 2, 1,
+		v007Element("tag", "@note", "note", 1, 6),
+		v007Element("content", "1) Read (carefully.", "1) Read (carefully.", 7, 26))),
+		"inline content", []v007Expected{{3, 15, 16, v007OpenDetail}})
+	v007Run(t, v007Document(v007Line("a) _____", "content", 2, 1,
+		v007Element("content", "a)", "a)", 1, 3),
+		v007Element("placeholder", "_____", "_____", 4, 9))), "item starts with placeholder", nil)
+	v007Run(t, v007Document(v007Line("Read a) text", "content", 2, 1,
+		v007Element("content", "Read", "Read", 1, 5),
+		v007Element("content", "a) text", "a) text", 6, 13))),
+		"later content is not a marker", []v007Expected{{3, 7, 8, v007CloseDetail}})
+	// Такое же начало служебного значения не превращается в маркер списка.
+	v007Run(t, v007Document(v007Line("@media audio a) Read.", "tag", 2, 1,
+		v007Element("tag", "@media", "media", 1, 7),
+		v007Element("media-type", "audio", "audio", 8, 13),
+		v007Element("source", "a) Read.", "a) Read.", 14, 22))),
+		"literal source", []v007Expected{{3, 15, 16, v007CloseDetail}})
+}
+
 func TestV007RawAndStructure(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -16,26 +16,29 @@ func registrationV030(registry *diagnostics.Registry) error {
 }
 
 // checkV030 отмечает каждый заданный символ в исходных текстовых элементах
-// и unparsed без преобразований. Диапазон содержит одну кодовую точку Unicode,
+// и unparsed, включая внутренность ответов в content и placeholder.
+// Диапазон содержит одну исходную кодовую точку Unicode,
 // колонки начинаются с 1; конкретизация и связанные диапазоны отсутствуют.
 func checkV030(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
+		raw := []rune(line.Raw())
+		_, answers := v015PlaceholderContext(lines, line)
 		for index := 0; index < line.ElementCount(); index++ {
 			element, _ := line.Element(index)
 			switch element.Type() {
-			case "content", "title", "name", "unparsed":
+			case "content", "title", "name", "unparsed", "placeholder":
 			default:
 				continue
 			}
-			column := element.Start()
-			for _, char := range element.Raw() {
-				if v030NonstandardDash(char) {
-					if _, err := findings.Add(line.Number(), column, line.Number(), column+1, ""); err != nil {
-						return err
+			for _, part := range v015TextParts(raw, element, answers) {
+				for i := part.start; i < part.end; i++ {
+					if v030NonstandardDash(raw[i]) {
+						if _, err := findings.Add(line.Number(), i+1, line.Number(), i+2, ""); err != nil {
+							return err
+						}
 					}
 				}
-				column++
 			}
 		}
 	}

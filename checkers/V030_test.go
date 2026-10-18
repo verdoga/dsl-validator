@@ -60,6 +60,23 @@ func TestV030EachCodePoint(t *testing.T) {
 	}
 }
 
+func TestV030AnswerRepresentations(t *testing.T) {
+	for _, separate := range []bool{false, true} {
+		for _, sign := range []rune{'\u00AD', '\u2010', '\u2011', '\u2012', '\u2015', '\uFE58', '\uFE63', '\uFF0D'} {
+			result := v015AnswerDocument(t, "", "a"+string(sign)+"b", "", separate)
+			v030Run(t, result, "current", [][3]int{{4, 8, 9}})
+			for _, entry := range result.Diagnostics {
+				if entry.DiagnosticCode == "V015" {
+					t.Fatal("nonstandard dash belongs to V030, not V015")
+				}
+			}
+		}
+		v030Run(t, v015AnswerDocument(t, "Я😀 ", `a\}‐`, " ‑", separate), "current", [][3]int{{4, 13, 14}, {4, 16, 17}})
+		v030Run(t, v015AnswerDocument(t, "", "a-b – c — d", "", separate), "current", nil)
+	}
+	v030Run(t, v021Block(t, "multifill", v021Text(t, "_____{a‐b", 3, 2)), "current", [][3]int{{4, 8, 9}})
+}
+
 func TestV030Contexts(t *testing.T) {
 	for _, tc := range []struct {
 		name string

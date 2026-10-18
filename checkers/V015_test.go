@@ -35,6 +35,8 @@ func TestV015Text(t *testing.T) {
 		{"Greek uppercase is not folded", "ΒΘΧ", "ΒΘΧ", []v015Finding{{3, 1, 4, "Обнаружены U+0392, U+0398 и U+03A7"}}},
 		{"IPA without delimiters", "ˈwɜːd", "ˈwɜːd", nil},
 		{"all arrows without context", "↑↓↗↘", "↑↓↗↘", nil},
+		{"teaching transformation", "I am → I'm", "I am → I'm", nil},
+		{"arrow splits forbidden characters", "□→✓", "□→✓", []v015Finding{{3, 1, 2, "Обнаружен U+25A1"}, {3, 3, 4, "Обнаружен U+2713"}}},
 		{"unclosed delimiters", "/↑ [↓", "/↑ [↓", nil},
 		{"Unicode decimal digits", "0９١", "0９١", nil},
 		{"other numbers", "²Ⅳ", "²Ⅳ", []v015Finding{{3, 1, 3, "Обнаружены U+00B2 и U+2163"}}},
@@ -191,6 +193,7 @@ func TestV015Placeholders(t *testing.T) {
 		{"answer", `_____{□✓}`, `□✓`, false, []v015Finding{{4, 7, 9, "Обнаружены U+25A1 и U+2713"}}},
 		{"no answer", `_____`, "", true, nil},
 		{"allowed answer", `_____{↑ˈwɜːd↓}`, `↑ˈwɜːd↓`, false, nil},
+		{"arrow in answer", `_____{I am → I'm}`, `I am → I'm`, false, nil},
 		{"raw escape is preserved", `_____{\{□✓}`, `{□✓`, false, []v015Finding{{4, 9, 11, "Обнаружены U+25A1 и U+2713"}}},
 		{"escaped closing brace", `_____{a\}□✓}`, `a}□✓`, false, []v015Finding{{4, 10, 12, "Обнаружены U+25A1 и U+2713"}}},
 		{"raw underscores in answer", `_____{\_}`, `\_`, false, []v015Finding{{4, 8, 9, "Обнаружен U+005F"}}},
@@ -213,6 +216,121 @@ func TestV015Placeholders(t *testing.T) {
 		[]v015Finding{{4, 7, 8, "Обнаружен U+25A1"}, {4, 15, 16, "Обнаружен U+2713"}})
 }
 
+func TestV015MalformedAnswerKeepsTextChecks(t *testing.T) {
+	// Полный каталог также выдаёт V005 на незакрытую фигурную скобку.
+	// Проверка целостности в v015Run контролирует её флаги и обратные ссылки;
+	// V012 и V017 обязаны независимо продолжать проверку содержимого.
+	result := v021Block(t, "multifill", v021Text(t, "_____{1-12 Word ,", 3, 2))
+	v015Run(t, result, "current", []v015Finding{{4, 1, 6, "Обнаружены U+005F, U+005F, U+005F, U+005F и U+005F"}})
+	for _, tc := range []struct {
+		code             diagnostics.Code
+		line, start, end int
+		severity         string
+	}{
+		{"V005", 3, 12, 13, "error"},
+		{"V012", 4, 8, 9, "recommendation"},
+		{"V017", 4, 16, 17, "warning"},
+	} {
+		count := 0
+		for _, entry := range result.Diagnostics {
+			if entry.DiagnosticCode != tc.code {
+				continue
+			}
+			count++
+			want := model.Location{Start: model.Position{Line: tc.line, Column: tc.start}, End: model.Position{Line: tc.line, Column: tc.end}}
+			if entry.Location == nil || *entry.Location != want || string(entry.SeverityLevel) != tc.severity {
+				t.Errorf("%s: unexpected finding %+v, location %+v", tc.code, entry, entry.Location)
+			}
+		}
+		if count != 1 {
+			t.Errorf("%s count = %d, want 1", tc.code, count)
+		}
+	}
+}
+
+// v015AnswerDocument задаёт две модели одной исходной строки. Границы
+// входных элементов вычисляются по длинам явно заданных фрагментов;
+// ожидаемые координаты диагностик каждый тест задаёт независимо.
+func v015AnswerDocument(t *testing.T, before, answer, after string, separate bool) *model.Result {
+	t.Helper()
+	gap := "_____{" + answer + "}"
+	raw := before + gap + after
+	line := v015Text(t, raw, 3, 2)
+	if separate {
+		line.Elements = []model.Element{}
+		if before != "" {
+			line.Elements = append(line.Elements, v015Element(t, "content", before, before, 1, utf8.RuneCountInString(before)+1))
+		}
+		start := utf8.RuneCountInString(before) + 1
+		end := start + utf8.RuneCountInString(gap)
+		line.Elements = append(line.Elements, v015Element(t, "placeholder", gap, answer, start, end))
+		if after != "" {
+			line.Elements = append(line.Elements, v015Element(t, "content", after, after, end, end+utf8.RuneCountInString(after)))
+		}
+	}
+	return v015Document(t, v015Open(t, "multifill", 2, 1), line, v015Close(t, 3, 2))
+}
+
+func TestV015ContentPlaceholders(t *testing.T) {
+	const underscores = "Обнаружены U+005F, U+005F, U+005F, U+005F и U+005F"
+	for _, tc := range []struct {
+		name, raw, value string
+		want             []v015Finding
+	}{
+		{"plain", "_____", "_____", nil},
+		{"reported example", "1. _____{Brazil}: Brazilian", "1. _____{Brazil}: Brazilian", nil},
+		{"answer stays checked", "_____{□✓}", "_____{□✓}", []v015Finding{{4, 7, 9, "Обнаружены U+25A1 и U+2713"}}},
+		{"outside stays checked", "□_____✓", "□_____✓", []v015Finding{{4, 1, 2, "Обнаружен U+25A1"}, {4, 7, 8, "Обнаружен U+2713"}}},
+		{"multiple answers", "_____{□}_____{✓}", "_____{□}_____{✓}", []v015Finding{{4, 7, 8, "Обнаружен U+25A1"}, {4, 15, 16, "Обнаружен U+2713"}}},
+		{"underscores in answer are data", "_____{_____}", "_____{_____}", []v015Finding{{4, 7, 12, underscores}}},
+		{"escaped closing brace", `_____{a\}□✓}`, `_____{a}□✓}`, []v015Finding{{4, 10, 12, "Обнаружены U+25A1 и U+2713"}}},
+		{"even slashes close answer", `_____{a\\}_____`, `_____{a\}_____`, nil},
+		{"escaped gap", `\_____`, "_____", []v015Finding{{4, 2, 7, underscores}}},
+		{"paired slashes", `\\_____`, `\_____`, nil},
+		{"odd slashes", `\\\_____`, `\_____`, []v015Finding{{4, 4, 9, underscores}}},
+		{"single underscore", "a_b", "a_b", []v015Finding{{4, 2, 3, "Обнаружен U+005F"}}},
+		{"no partial gap in longer run", "______", "______", []v015Finding{{4, 1, 7, "Обнаружены U+005F, U+005F, U+005F, U+005F, U+005F и U+005F"}}},
+		{"unclosed answer falls back", "_____{□", "_____{□", []v015Finding{{4, 1, 6, underscores}, {4, 7, 8, "Обнаружен U+25A1"}}},
+		{"Unicode offset and raw value", "Я _____{□}✓", "different", []v015Finding{{4, 9, 10, "Обнаружен U+25A1"}, {4, 11, 12, "Обнаружен U+2713"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := v015Line(t, tc.raw, "content", 3, 2,
+				v015Element(t, "content", tc.raw, tc.value, 1, utf8.RuneCountInString(tc.raw)+1))
+			v015Run(t, v015Document(t, v015Open(t, "multifill", 2, 1), content, v015Close(t, 3, 2)), "current", tc.want)
+		})
+	}
+	for _, tag := range []string{"text", "instr", "editor", "key", "answer", "choice", "multichoice", "matching", "ordering"} {
+		t.Run("context/"+tag, func(t *testing.T) {
+			var want []v015Finding
+			if tag != "text" && tag != "instr" {
+				want = []v015Finding{{4, 1, 6, underscores}}
+			}
+			v015Run(t, v015Document(t, v015Open(t, tag, 2, 1), v015Text(t, "_____", 3, 2), v015Close(t, 3, 2)), "current", want)
+		})
+	}
+	v015Run(t, v015Document(t, v015Text(t, "_____", 2, 1)), "current", nil)
+	for _, tag := range []string{"question", "editor", "answer"} {
+		t.Run("inline/"+tag, func(t *testing.T) {
+			start := len(tag) + 3
+			var want []v015Finding
+			if tag != "question" {
+				want = []v015Finding{{3, start, start + 5, underscores}}
+			}
+			v015Run(t, v015Document(t, v015Line(t, "@"+tag+" _____", "tag", 2, 1,
+				v015Element(t, "tag", "@"+tag, tag, 1, start-1),
+				v015Element(t, "content", "_____", "_____", start, start+5))), "current", want)
+		})
+	}
+	t.Run("title is literal", func(t *testing.T) {
+		result := v015Document(t)
+		title := "_____"
+		result.Document.Metadata.Title = &title
+		result.Lines[1].Raw = "# _____"
+		result.Lines[1].Elements[1] = v015Element(t, "title", title, title, 3, 8)
+		v015Run(t, result, "current", []v015Finding{{2, 3, 8, underscores}})
+	})
+}
+
 func TestV015HeadingAndMetadata(t *testing.T) {
 	t.Run("title", func(t *testing.T) {
 		result := v015Document(t, v015Text(t, "Text.", 2, 1))
@@ -228,6 +346,8 @@ func TestV015HeadingAndMetadata(t *testing.T) {
 		want                        []v015Finding
 	}{
 		{"name", "@section □✓", "section", "name", "□✓", 9, 10, 12, []v015Finding{{2, 10, 12, "Обнаружены U+25A1 и U+2713"}}},
+		{"name is not a gap", "@section _____", "section", "name", "_____", 9, 10, 15,
+			[]v015Finding{{2, 10, 15, "Обнаружены U+005F, U+005F, U+005F, U+005F и U+005F"}}},
 		{"resource path", "@resource-dir □✓", "resource-dir", "resource-path", "□✓", 14, 15, 17, nil},
 		{"identifier", "@document-id unit-1", "document-id", "identifier", "unit-1", 13, 14, 20, nil},
 	} {

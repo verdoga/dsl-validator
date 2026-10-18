@@ -6,11 +6,11 @@ import (
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
 
-// registrationV045 регистрирует ошибку повторного пути ресурсов для DSL 1.2.
+// registrationV045 регистрирует предупреждение о повторном пути ресурсов для DSL 1.2.
 func registrationV045(registry *diagnostics.Registry) error {
 	return registry.Register(diagnostics.Definition{
 		Code:     "V045",
-		Severity: diagnostics.SeverityError,
+		Severity: diagnostics.SeverityWarning,
 		Message:  "Путь к каталогу ресурсов указан повторно.",
 		Scope:    diagnostics.ScopeElement,
 		Versions: diagnostics.VersionRule{Mode: diagnostics.VersionExact, Version: "1.2"},

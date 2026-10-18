@@ -81,6 +81,50 @@ func TestV012SignsBetweenDigits(t *testing.T) {
 	}
 }
 
+func TestV012FormattingNeighbours(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want [][3]int
+	}{
+		{"1-<em>12</em>", [][3]int{{4, 2, 3}}},
+		{"<em>1</em>-12", [][3]int{{4, 11, 12}}},
+		{"1<em>-</em>12", [][3]int{{4, 6, 7}}},
+		{"Я😀 <u>١</u> \t— <EM>٢</EM>", [][3]int{{4, 14, 15}}},
+		{"1–<em>12</em>", nil},
+		{"a-<em>b</em>", nil},
+		{"1-<em>-2</em>", nil},
+		{`1-\<em>12</em>`, nil},
+		{`1-<em\>12</em>`, nil},
+		{"1-<foo>12</foo>", nil},
+		{"1-<em x=y>12</em>", nil},
+		{"1-<br>12", nil},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			v012Run(t, v020TextBlock(t, tc.raw), "current", tc.want, 1)
+		})
+	}
+	v012Run(t, v020TextBlock(t, "1-", "<em>12</em>"), "current", nil, 1)
+	v012Run(t, v021Block(t, "editor", v021Text(t, "1-<em>12</em>", 3, 2)), "current", nil, 1)
+	result := v020TextBlock(t, "1-<em>12</em>")
+	result.Lines[3].Elements = []model.Element{
+		v012Element(t, "content", "1-", "1-", 1),
+		v012Element(t, "content", "<em>12</em>", "<em>12</em>", 3),
+	}
+	v012Run(t, result, "current", nil, 1)
+}
+
+func TestV012AnswerRepresentations(t *testing.T) {
+	for _, separate := range []bool{false, true} {
+		v012Run(t, v015AnswerDocument(t, "", "1-12", "", separate), "current", [][3]int{{4, 8, 9}}, 1)
+		v012Run(t, v015AnswerDocument(t, "Я😀 ", `a\}١—٢`, " 3-4", separate), "current", [][3]int{{4, 14, 15}, {4, 19, 20}}, 1)
+		v012Run(t, v015AnswerDocument(t, "1-", "12", "", separate), "current", nil, 1)
+		v012Run(t, v015AnswerDocument(t, "", "1-", "12", separate), "current", nil, 1)
+		v012Run(t, v015AnswerDocument(t, "", "1", "-12", separate), "current", nil, 1)
+		v012Run(t, v015AnswerDocument(t, "", "1–12", "", separate), "current", nil, 1)
+		v012Run(t, v015AnswerDocument(t, "", "1-<em>12</em>", "", separate), "current", nil, 1)
+	}
+}
+
 func TestV012RawPositions(t *testing.T) {
 	for _, tc := range []struct {
 		name string

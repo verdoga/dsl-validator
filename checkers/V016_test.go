@@ -47,7 +47,6 @@ const (
 	v016Tilde     = "Обнаружен символ ~ U+007E"
 	v016Less      = "Обнаружен символ < U+003C"
 	v016Greater   = "Обнаружен символ > U+003E"
-	v016Equal     = "Обнаружен символ = U+003D"
 )
 
 func TestV016RawSymbols(t *testing.T) {
@@ -59,17 +58,20 @@ func TestV016RawSymbols(t *testing.T) {
 	}{
 		{"example", "Read ^this.", []v016Expected{{3, 6, 7, v016Caret}}},
 		{"ordinary text", "Read this.", nil},
-		{"all eight symbols", "^&*`~<>=", []v016Expected{
+		{"seven forbidden symbols and allowed equal", "^&*`~<>=", []v016Expected{
 			{3, 1, 2, v016Caret}, {3, 2, 3, v016Ampersand}, {3, 3, 4, v016Star}, {3, 4, 5, v016Backtick},
-			{3, 5, 6, v016Tilde}, {3, 6, 7, v016Less}, {3, 7, 8, v016Greater}, {3, 8, 9, v016Equal},
+			{3, 5, 6, v016Tilde}, {3, 6, 7, v016Less}, {3, 7, 8, v016Greater},
 		}},
-		{"equal between letters", "a=b", []v016Expected{{3, 2, 3, v016Equal}}},
-		{"one symbol", "=", []v016Expected{{3, 1, 2, v016Equal}}},
+		{"equal between letters", "a=b", nil},
+		{"one symbol", "=", nil},
+		{"arithmetic", "2 + 2 = 4", nil},
+		{"teaching equivalence", "the USA = the United States of America", nil},
+		{"equal does not hide forbidden symbol", "2 + 2 = 4 ^", []v016Expected{{3, 11, 12, v016Caret}}},
 		{"adjacent repetitions", "^^", []v016Expected{{3, 1, 2, v016Caret}, {3, 2, 3, v016Caret}}},
 		{"first and last", "*x~", []v016Expected{{3, 1, 2, v016Star}, {3, 3, 4, v016Tilde}}},
-		{"Unicode columns", "Я🙂=", []v016Expected{{3, 3, 4, v016Equal}}},
+		{"Unicode columns", "Я🙂=^", []v016Expected{{3, 4, 5, v016Caret}}},
 		{"combining mark", "е\u0301^", []v016Expected{{3, 3, 4, v016Caret}}},
-		{"tabs and nonbreaking space", "\t^\u00a0=", []v016Expected{{3, 2, 3, v016Caret}, {3, 4, 5, v016Equal}}},
+		{"tabs and nonbreaking space", "\t^\u00a0=", []v016Expected{{3, 2, 3, v016Caret}}},
 		{"backslash does not hide caret", `\^`, []v016Expected{{3, 2, 3, v016Caret}}},
 		{"quoted symbol", `"&"`, []v016Expected{{3, 2, 3, v016Ampersand}}},
 		{"ordinary HTML-looking text", "<em>x</em>", []v016Expected{
@@ -95,7 +97,7 @@ func TestV016TextMarkers(t *testing.T) {
 		{"all paired markers", "<strong><em><u>x</u></em></strong>", "<strong><em><u>x</u></em></strong>", nil},
 		{"case insensitive", "<StRoNg><EM><U>x</u></eM></STRONG>", "<StRoNg><EM><U>x</u></eM></STRONG>", nil},
 		{"marker content checked", "<em>^</em>", "<em>^</em>", []v016Expected{{4, 5, 6, v016Caret}}},
-		{"equal in marker content", "<u>=</u>", "<u>=</u>", []v016Expected{{4, 4, 5, v016Equal}}},
+		{"equal in marker content", "<u>=</u>", "<u>=</u>", nil},
 		{"standalone br", "<br>", "<br>", nil},
 		{"standalone uppercase br", "<BR>", "<BR>", nil},
 		{"br with edge spaces", " \t<br>\t ", "<br>", nil},
@@ -103,7 +105,7 @@ func TestV016TextMarkers(t *testing.T) {
 		{"self closing br", "<br/>", "<br/>", []v016Expected{{4, 1, 2, v016Less}, {4, 5, 6, v016Greater}}},
 		{"spaced self closing br", "<br />", "<br />", []v016Expected{{4, 1, 2, v016Less}, {4, 6, 7, v016Greater}}},
 		{"closing br", "</br>", "</br>", []v016Expected{{4, 1, 2, v016Less}, {4, 5, 6, v016Greater}}},
-		{"attributes", "<em x=y>", "<em x=y>", []v016Expected{{4, 1, 2, v016Less}, {4, 6, 7, v016Equal}, {4, 8, 9, v016Greater}}},
+		{"attributes", "<em x=y>", "<em x=y>", []v016Expected{{4, 1, 2, v016Less}, {4, 8, 9, v016Greater}}},
 		{"unknown tag", "<foo>", "<foo>", []v016Expected{{4, 1, 2, v016Less}, {4, 5, 6, v016Greater}}},
 		{"marker with space", "<em >", "<em >", []v016Expected{{4, 1, 2, v016Less}, {4, 5, 6, v016Greater}}},
 		{"comparisons", "1 < 2 > 0", "1 < 2 > 0", []v016Expected{{4, 3, 4, v016Less}, {4, 7, 8, v016Greater}}},
@@ -116,7 +118,7 @@ func TestV016TextMarkers(t *testing.T) {
 		{"unmatched closing marker", "</u>", "</u>", nil},
 		{"incomplete marker", "<em", "<em", []v016Expected{{4, 1, 2, v016Less}}},
 		{"stray closing angle", ">", ">", []v016Expected{{4, 1, 2, v016Greater}}},
-		{"Unicode before marker", "Я🙂<u>x</u>=", "Я🙂<u>x</u>=", []v016Expected{{4, 11, 12, v016Equal}}},
+		{"Unicode before marker", "Я🙂<u>x</u>=^", "Я🙂<u>x</u>=^", []v016Expected{{4, 12, 13, v016Caret}}},
 		{"entity inside text", "&lt;em&gt;", "&lt;em&gt;", []v016Expected{{4, 1, 2, v016Ampersand}, {4, 7, 8, v016Ampersand}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -155,7 +157,7 @@ func TestV016Contexts(t *testing.T) {
 			v016Text(t, "^", 4, 3), v016Close(t, 4, 3), v016Close(t, 3, 2)}, []v016Expected{{5, 1, 2, v016Caret}}},
 		{"placeholder answer", []model.Line{v016Open(t, "multifill", 2, 1),
 			v016Line(t, "_____{a=b}", "content", 3, 2, v016Element(t, "placeholder", "_____{a=b}", "a=b", 1, 11)),
-			v016Close(t, 3, 2)}, []v016Expected{{4, 8, 9, v016Equal}}},
+			v016Close(t, 3, 2)}, nil},
 		{"text context ends at block boundary", []model.Line{v016Open(t, "text", 2, 1), v016Text(t, "<em>x</em>", 3, 2),
 			v016Close(t, 3, 2), v016Text(t, "<em>", 2, 1)}, []v016Expected{{6, 1, 2, v016Less}, {6, 4, 5, v016Greater}}},
 		{"markers cannot span rows", []model.Line{v016Open(t, "text", 2, 1), v016Text(t, "<em", 3, 2),
@@ -174,6 +176,71 @@ func TestV016Contexts(t *testing.T) {
 	}
 }
 
+func TestV016SplitTableCells(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		want      []v016Expected
+	}{
+		{"split cell", "<a | b>", nil},
+		{"several cells", "x | <a|b> | <c|d> | y", nil},
+		{"empty parts", "<|>", nil},
+		{"indentation", " \t<a | b>\t ", nil},
+		{"content still checked", "<a^ | b>", []v016Expected{{4, 3, 4, v016Caret}}},
+		{"Unicode columns", "Я🙂 | <a|b> | =^", []v016Expected{{4, 15, 16, v016Caret}}},
+		{"symbol after closing is not cell syntax", "Я🙂 | <a|b> =", []v016Expected{{4, 6, 7, v016Less}, {4, 10, 11, v016Greater}}},
+		{"literal comparisons", "1 < 2 > 0", []v016Expected{{4, 3, 4, v016Less}, {4, 7, 8, v016Greater}}},
+		{"not at cell start", "x<a|b>", []v016Expected{{4, 2, 3, v016Less}, {4, 6, 7, v016Greater}}},
+		{"not at cell end", "<a|b>x", []v016Expected{{4, 1, 2, v016Less}, {4, 5, 6, v016Greater}}},
+		{"no separator", "<ab>", []v016Expected{{4, 1, 2, v016Less}, {4, 4, 5, v016Greater}}},
+		{"unclosed", "<a|b", []v016Expected{{4, 1, 2, v016Less}}},
+		{"stray closing", "a|b>", []v016Expected{{4, 4, 5, v016Greater}}},
+		{"nested", "<a|<b|c>>", []v016Expected{{4, 1, 2, v016Less}, {4, 4, 5, v016Less}, {4, 8, 9, v016Greater}, {4, 9, 10, v016Greater}}},
+		{"escaped pipe is not separator", `<a\|b>`, []v016Expected{{4, 1, 2, v016Less}, {4, 6, 7, v016Greater}}},
+		{"paired slashes before separator", `<a\\|b>`, nil},
+		{"odd slashes before separator", `<a\\\|b>`, []v016Expected{{4, 1, 2, v016Less}, {4, 8, 9, v016Greater}}},
+		{"escaped opening", `\<a|b>`, []v016Expected{{4, 2, 3, v016Less}, {4, 6, 7, v016Greater}}},
+		{"escaped closing", `<a|b\>`, []v016Expected{{4, 1, 2, v016Less}, {4, 6, 7, v016Greater}}},
+		{"paired slashes before closing", `<a|b\\>`, nil},
+		{"literal angles inside", `<a\<|b\>>`, []v016Expected{{4, 4, 5, v016Less}, {4, 8, 9, v016Greater}}},
+		{"continue after invalid cell", "<a|b>x | <c|d> | ^", []v016Expected{{4, 1, 2, v016Less}, {4, 5, 6, v016Greater}, {4, 18, 19, v016Caret}}},
+		{"two invalid cells", "<a|b>x | <c|d> ^", []v016Expected{{4, 1, 2, v016Less}, {4, 5, 6, v016Greater}, {4, 10, 11, v016Less}, {4, 14, 15, v016Greater}, {4, 16, 17, v016Caret}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v016Run(t, v016Document(t, v016Open(t, "table", 2, 1), v016Text(t, tc.raw, 3, 2), v016Close(t, 3, 2)), "current", tc.want)
+		})
+	}
+	t.Run("outside and after table", func(t *testing.T) {
+		v016Run(t, v016Document(t, v016Text(t, "<a|b>", 2, 1), v016Open(t, "table", 2, 1),
+			v016Text(t, "<a|b>", 4, 2), v016Close(t, 4, 2), v016Text(t, "<a|b>", 2, 1)), "current",
+			[]v016Expected{{3, 1, 2, v016Less}, {3, 5, 6, v016Greater}, {7, 1, 2, v016Less}, {7, 5, 6, v016Greater}})
+	})
+	t.Run("title is not a cell", func(t *testing.T) {
+		v016Run(t, v016Document(t, v016Line(t, "@table <a|b> {", "block-start", 2, 1,
+			v016Element(t, "tag", "@table", "table", 1, 7), v016Element(t, "title", "<a|b>", "<a|b>", 8, 13),
+			v016Element(t, "block-open", "{", "{", 14, 15)), v016Close(t, 3, 2)), "current",
+			[]v016Expected{{3, 8, 9, v016Less}, {3, 12, 13, v016Greater}})
+	})
+	t.Run("structural markers outside content elements", func(t *testing.T) {
+		v016Run(t, v016Document(t, v016Open(t, "table", 2, 1),
+			v016Line(t, "<a|b>", "content", 3, 2, v016Element(t, "content", "a", "a", 2, 3),
+				v016Element(t, "content", "b", "b", 4, 5)), v016Close(t, 3, 2)), "current", nil)
+	})
+	t.Run("unparsed cell stays checked beside valid cell", func(t *testing.T) {
+		row := v016Line(t, "<a|b> | <c|d>", "content", 3, 2,
+			model.Element{ElementType: "unparsed", Raw: "<a|b>", Start: 1, End: 6, ErrorIDs: []string{"parser-error"}},
+			v016Element(t, "content", "<c|d>", "<c|d>", 9, 14))
+		row.HasErrors = true
+		result := v016Document(t, v016Open(t, "table", 2, 1), row, v016Close(t, 3, 2))
+		result.Document.HasErrors = true
+		result.Diagnostics = []model.Diagnostic{{ID: "parser-error", Source: "parser", DiagnosticCode: "fixture-parser-error",
+			SeverityLevel: "error", DiagnosticScope: "element", Message: "Неразобранный фрагмент.",
+			Location:         &model.Location{Start: model.Position{Line: 4, Column: 1}, End: model.Position{Line: 4, Column: 6}},
+			RelatedLocations: []model.Location{},
+		}}
+		v016Run(t, result, "current", []v016Expected{{4, 1, 2, v016Less}, {4, 5, 6, v016Greater}})
+	})
+}
+
 func TestV016ServiceFields(t *testing.T) {
 	t.Run("resource path", func(t *testing.T) {
 		base := v016Document(t)
@@ -184,17 +251,23 @@ func TestV016ServiceFields(t *testing.T) {
 		result.Document.Metadata.ResourceDirs = []string{"assets/^"}
 		v016Run(t, result, "current", []v016Expected{{2, 22, 23, v016Caret}})
 	})
-	t.Run("media source", func(t *testing.T) {
-		base := v016Document(t)
-		path := v016Line(t, "@resource-dir .", "tag", 0, 0,
-			v016Element(t, "tag", "@resource-dir", "resource-dir", 1, 14), v016Element(t, "resource-path", ".", ".", 15, 16))
-		media := v016Line(t, `@media image "a=b.png"`, "tag", 3, 1,
-			v016Element(t, "tag", "@media", "media", 1, 7), v016Element(t, "media-type", "image", "image", 8, 13),
-			v016Element(t, "source", `"a=b.png"`, "a=b.png", 14, 23))
-		result := v016Model(t, base.Lines[0], path, base.Lines[1], media)
-		result.Document.Metadata.ResourceDirs = []string{"."}
-		v016Run(t, result, "current", []v016Expected{{4, 16, 17, v016Equal}})
-	})
+	for _, tc := range []struct {
+		path string
+		want []v016Expected
+	}{{"a=b.png", nil}, {"a^b.png", []v016Expected{{4, 16, 17, v016Caret}}}} {
+		t.Run("media source "+tc.path, func(t *testing.T) {
+			base := v016Document(t)
+			path := v016Line(t, "@resource-dir .", "tag", 0, 0,
+				v016Element(t, "tag", "@resource-dir", "resource-dir", 1, 14), v016Element(t, "resource-path", ".", ".", 15, 16))
+			quoted := `"` + tc.path + `"`
+			media := v016Line(t, "@media image "+quoted, "tag", 3, 1,
+				v016Element(t, "tag", "@media", "media", 1, 7), v016Element(t, "media-type", "image", "image", 8, 13),
+				v016Element(t, "source", quoted, tc.path, 14, 23))
+			result := v016Model(t, base.Lines[0], path, base.Lines[1], media)
+			result.Document.Metadata.ResourceDirs = []string{"."}
+			v016Run(t, result, "current", tc.want)
+		})
+	}
 	t.Run("heading title", func(t *testing.T) {
 		base := v016Document(t)
 		heading := v016Line(t, "# Unit ^", "heading", 0, 0,
@@ -204,15 +277,19 @@ func TestV016ServiceFields(t *testing.T) {
 		result.Document.Metadata.Title = &title
 		v016Run(t, result, "current", []v016Expected{{2, 8, 9, v016Caret}})
 	})
-	t.Run("section name", func(t *testing.T) {
-		base := v016Document(t)
-		section := v016Line(t, "@section A=B", "tag", 0, 0,
-			v016Element(t, "tag", "@section", "section", 1, 9), v016Element(t, "name", "A=B", "A=B", 10, 13))
-		result := v016Model(t, base.Lines[0], section, base.Lines[1])
-		name := "A=B"
-		result.Document.Metadata.Section = &name
-		v016Run(t, result, "current", []v016Expected{{2, 11, 12, v016Equal}})
-	})
+	for _, tc := range []struct {
+		name string
+		want []v016Expected
+	}{{"A=B", nil}, {"A^B", []v016Expected{{2, 11, 12, v016Caret}}}} {
+		t.Run("section name "+tc.name, func(t *testing.T) {
+			base := v016Document(t)
+			section := v016Line(t, "@section "+tc.name, "tag", 0, 0,
+				v016Element(t, "tag", "@section", "section", 1, 9), v016Element(t, "name", tc.name, tc.name, 10, 13))
+			result := v016Model(t, base.Lines[0], section, base.Lines[1])
+			result.Document.Metadata.Section = &tc.name
+			v016Run(t, result, "current", tc.want)
+		})
+	}
 }
 
 func TestV016Unparsed(t *testing.T) {
@@ -264,12 +341,12 @@ func TestV016LineEndingsAndHistory(t *testing.T) {
 		{"mixed", "\r\n", "\n"},
 	} {
 		t.Run(ending.name, func(t *testing.T) {
-			result := v016Document(t, v016Text(t, "^", 2, 1), v016Text(t, "=", 2, 1))
+			result := v016Document(t, v016Text(t, "^", 2, 1), v016Text(t, "=~", 2, 1))
 			for i := range result.Lines {
 				result.Lines[i].LineEnding = ending.eol
 			}
 			result.Lines[3].LineEnding = ending.last
-			want := []v016Expected{{3, 1, 2, v016Caret}, {4, 1, 2, v016Equal}}
+			want := []v016Expected{{3, 1, 2, v016Caret}, {4, 2, 3, v016Tilde}}
 			v016Run(t, result, "first", want)
 			v016Run(t, result, "second", want)
 			v016Run(t, v016Document(t, v016Text(t, "Clean.", 2, 1)), "current", nil)

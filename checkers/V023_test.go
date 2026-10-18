@@ -60,7 +60,12 @@ func TestV023Text(t *testing.T) {
 		{"first occurrence order", "1l2O3", []v023Expected{{3, 1, 6, "l → 1; O → 0"}}},
 		{"repeated zero letter listed once", "1O2O3", []v023Expected{{3, 1, 6, "O → 0"}}},
 		{"repeated other letter listed once", "1S2S3", []v023Expected{{3, 1, 6, "S → 5"}}},
-		{"zero letter lifts counts for mixed letters", "Ol", []v023Expected{{3, 1, 3, "O → 0; l → 1"}}},
+		{"zero letter still requires a real digit", "Ol", nil},
+		{"ordinary So", "So", nil},
+		{"ordinary lo", "lo", nil},
+		{"digit in previous token is insufficient", "123 So", nil},
+		{"digit in next token is insufficient", "lo 123", nil},
+		{"words beside a mixed number", "So 1O lo", []v023Expected{{3, 4, 6, "O → 0"}}},
 		{"unsupported letter", "12G", nil},
 		{"unsupported letter still rejects zero candidate", "1O5G", nil},
 		{"lowercase i is not mapped", "12i", nil},
@@ -118,19 +123,22 @@ func TestV023ZeroLetterVariants(t *testing.T) {
 				name, raw string
 				end       int
 			}{
-				{"no real digits", variant.letter, 2},
+				{"no real digits", variant.letter, 0},
 				{"one digit before", "1" + variant.letter, 3},
 				{"one digit after", variant.letter + "1", 3},
 				{"equal counts", "1" + variant.letter + variant.letter + "5", 5},
-				{"letters only", variant.letter + variant.letter, 3},
-				{"decimal with no real digits", variant.letter + "." + variant.letter, 4},
-				{"comma decimal with no real digits", variant.letter + "," + variant.letter, 4},
-				{"negative with no real digits", "-" + variant.letter, 3},
-				{"positive with no real digits", "+" + variant.letter, 3},
+				{"letters only", variant.letter + variant.letter, 0},
+				{"decimal with no real digits", variant.letter + "." + variant.letter, 0},
+				{"comma decimal with no real digits", variant.letter + "," + variant.letter, 0},
+				{"negative with no real digits", "-" + variant.letter, 0},
+				{"positive with no real digits", "+" + variant.letter, 0},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					v023Run(t, v023Document(t, v023Text(t, tc.raw, 2, 1)), "current",
-						[]v023Expected{{3, 1, tc.end, variant.detail}})
+					var want []v023Expected
+					if tc.end != 0 {
+						want = []v023Expected{{3, 1, tc.end, variant.detail}}
+					}
+					v023Run(t, v023Document(t, v023Text(t, tc.raw, 2, 1)), "current", want)
 				})
 			}
 		})

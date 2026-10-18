@@ -59,7 +59,8 @@ func v023TokenChar(char rune) bool {
 }
 
 // v023TokenDetail возвращает конкретизацию либо пустую строку для неподходящего
-// кандидата. O/o/О/о отменяют пороги числа цифр и соотношения с буквами;
+// кандидата. Исходная цифра в самом токене обязательна. O/o/О/о смягчают
+// остальные пороги числа цифр и соотношения с буквами;
 // остальные условия, включая форму числа после замены, остаются обязательными.
 // Замены выполняются в собственной копии, исходный токен не изменяется.
 func v023TokenDetail(token []rune) string {
@@ -90,7 +91,7 @@ func v023TokenDetail(token []rune) string {
 			replacements = append(replacements, string(char)+" → "+string(digit))
 		}
 	}
-	if letters == 0 || !hasZeroLetter && (digits < 2 || digits <= letters) || !v023Number(normalized) {
+	if digits == 0 || letters == 0 || !hasZeroLetter && (digits < 2 || digits <= letters) || !v023Number(normalized) {
 		return ""
 	}
 	return "Возможные замены: " + strings.Join(replacements, "; ")

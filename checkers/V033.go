@@ -8,7 +8,7 @@ import (
 )
 
 // v033Task хранит исходный диапазон ID и строки объявлений блока и ветви.
-// Нули variants и branch означают отсутствие соответствующего предка.
+// Нули variants и branch означают отсутствие блока или известной ветви.
 type v033Task struct {
 	line, start, end int
 	variants, branch int
@@ -16,7 +16,7 @@ type v033Task struct {
 
 // v033Parents описывает контекст существующей цепочки родителей строки.
 type v033Parents struct {
-	variants, branch int
+	variants         int
 	inBlock, literal bool
 }
 
@@ -37,8 +37,16 @@ func registrationV033(registry *diagnostics.Registry) error {
 // первое подходящее предыдущее вхождение. Исходные значения не изменяются.
 func checkV033(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	seen := make(map[string][]v033Task)
+	branches := make(map[int]int)
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
+		if line.Type() == "block-start" && v033Tag(line) == "variants" {
+			branches[number] = 0
+		}
+		if line.Type() == "block-end" {
+			parent, _ := line.ParentLine()
+			delete(branches, parent)
+		}
 		if line.Type() == "heading" {
 			if level := v033Element(line, "heading-level"); level != nil {
 				if value, _ := level.Value(); value == "3" {
@@ -51,11 +59,20 @@ func checkV033(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			continue
 		}
 		tag := v033Tag(line)
-		if tag != "task" && tag != "newpage" {
+		if tag != "task" && tag != "newpage" && tag != "variant" {
 			continue
 		}
 		parents := v033ParentContext(lines, line)
 		if parents.literal {
+			continue
+		}
+		if tag == "variant" {
+			// Ветвь задаётся последовательностью объявлений одного блока,
+			// даже когда задания не являются потомками @variant.
+			parent, _ := line.ParentLine()
+			if parents.variants != 0 && parent == parents.variants {
+				branches[parents.variants] = number
+			}
 			continue
 		}
 		if tag == "newpage" {
@@ -76,7 +93,7 @@ func checkV033(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		key := strings.ToLower(value)
 		current := v033Task{
 			line: number, start: identifier.Start(), end: identifier.End(),
-			variants: parents.variants, branch: parents.branch,
+			variants: parents.variants, branch: branches[parents.variants],
 		}
 		for _, previous := range seen[key] {
 			if current.variants != 0 && current.variants == previous.variants &&
@@ -132,7 +149,7 @@ func v033ValidID(value string) bool {
 }
 
 // v033ParentContext читает существующую цепочку родителей без восстановления
-// грамматики. Блоки и ветви различаются по строкам, не по отображаемым именам.
+// грамматики. Блоки различаются по строкам, не по отображаемым именам.
 func v033ParentContext(lines diagnostics.Lines, line diagnostics.Line) v033Parents {
 	var context v033Parents
 	for number, found := line.ParentLine(); found; number, found = line.ParentLine() {
@@ -146,9 +163,6 @@ func v033ParentContext(lines diagnostics.Lines, line diagnostics.Line) v033Paren
 			case "variants":
 				context.variants = number
 			}
-		}
-		if line.Type() == "tag" && tag == "variant" {
-			context.branch = number
 		}
 	}
 	return context
