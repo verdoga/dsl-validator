@@ -30,7 +30,7 @@ func checkV019(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
 		raw := []rune(line.Raw())
-		formatting := v019Formatting(lines, line, raw)
+		formatting := textFormatting(lines, line, raw)
 		for index := 0; index < line.ElementCount(); index++ {
 			element, _ := line.Element(index)
 			switch element.Type() {
@@ -42,7 +42,7 @@ func checkV019(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			default:
 				continue
 			}
-			text, positions := v019Visible(raw, formatting, element.Start()-1, element.End()-1)
+			text, positions := visibleText(raw, formatting, element.Start()-1, element.End()-1)
 			for start := 0; start < len(text); {
 				if !v019Letter(text[start]) {
 					start++
@@ -59,31 +59,6 @@ func checkV019(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		}
 	}
 	return nil
-}
-
-// v019Formatting отмечает разрешённое форматирование внутри content блока
-// text. Маска используется также V012, V017 и V020 без запуска V016.
-// Отдельный <br> остаётся границей; литеральные и экранированные теги не скрыты.
-func v019Formatting(lines diagnostics.Lines, line diagnostics.Line, raw []rune) []bool {
-	if !v016InsideText(lines, line) || strings.EqualFold(strings.Trim(line.Raw(), " \t"), "<br>") {
-		return nil
-	}
-	return v016HTMLMarkers(line, raw)
-}
-
-// v019Visible исключает только отмеченные маркеры из [start,end). positions
-// хранит исходный индекс каждой оставшейся кодовой точки; Raw не изменяется.
-func v019Visible(raw []rune, formatting []bool, start, end int) (text []rune, positions []int) {
-	text = make([]rune, 0, end-start)
-	positions = make([]int, 0, end-start)
-	for i := start; i < end; i++ {
-		if len(formatting) != 0 && formatting[i] {
-			continue
-		}
-		text = append(text, raw[i])
-		positions = append(positions, i)
-	}
-	return text, positions
 }
 
 // v019Apostrophe возвращает true для трёх соединительных апострофов V019;

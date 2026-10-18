@@ -123,9 +123,9 @@ func TestV017SpacedEllipses(t *testing.T) {
 		raw  string
 		want [][3]int
 	}{
-		{"three spaced dots", "Wait . . .", [][3]int{{3, 5, 6}}},
-		{"gap before last dot", "Wait .. .", [][3]int{{3, 5, 6}}},
-		{"gap after first dot", "Wait . ..", [][3]int{{3, 5, 6}}},
+		{"three spaced dots", "Wait . . .", nil},
+		{"gap before last dot", "Wait .. .", nil},
+		{"gap after first dot", "Wait . ..", nil},
 		{"four spaced dots", "Wait . . . .", [][3]int{{3, 5, 6}}},
 		{"long mixed chain", "Wait ... .. .", [][3]int{{3, 5, 6}}},
 		{"spaced ellipsis without preceding space", ". . .", nil},
@@ -133,9 +133,9 @@ func TestV017SpacedEllipses(t *testing.T) {
 		{"two dots below threshold", "Wait . .", [][3]int{{3, 5, 6}, {3, 7, 8}}},
 		{"two dots alone", ". .", [][3]int{{3, 2, 3}}},
 		{"two dots with multiple spaces", "Wait .  .", [][3]int{{3, 5, 6}, {3, 7, 9}}},
-		{"tabs and Zs between dots", "Wait .\t.\u00a0.", [][3]int{{3, 5, 6}}},
-		{"independent chains", "Wait . . . and . . .", [][3]int{{3, 5, 6}, {3, 15, 16}}},
-		{"punctuation after chain", "Wait . . . ,", [][3]int{{3, 5, 6}, {3, 11, 12}}},
+		{"tabs and Zs between dots", "Wait .\t.\u00a0.", nil},
+		{"independent chains", "Wait . . . and . . .", nil},
+		{"punctuation after chain", "Wait . . . ,", [][3]int{{3, 11, 12}}},
 		{"comma breaks chain", "Wait . . , .", [][3]int{{3, 5, 6}, {3, 7, 8}, {3, 9, 10}, {3, 11, 12}}},
 		{"ellipsis character is not a dot", "Wait . … .", [][3]int{{3, 5, 6}, {3, 7, 8}, {3, 9, 10}}},
 		{"zero width separator breaks chain", ". .\u200b .", [][3]int{{3, 2, 3}, {3, 5, 6}}},
@@ -197,8 +197,8 @@ func TestV017FormattingNeighbours(t *testing.T) {
 		{"Я😀\u00a0<u><EM>!</EM></u>", [][3]int{{4, 3, 4}}},
 		{"Wait <em>:</em> Next <u>;</u>", [][3]int{{4, 5, 6}, {4, 21, 22}}},
 		{"Wait <em>...</em>", nil},
-		{". <em>.</em> .", [][3]int{{4, 2, 3}, {4, 13, 14}}},
-		{"Wait <em>. . .</em>", [][3]int{{4, 5, 6}}},
+		{". <em>.</em> .", nil},
+		{"Wait <em>. . .</em>", nil},
 		{`Hello \<em>,</em>`, nil},
 		{`Hello <em\>,</em>`, nil},
 		{"Hello <foo>,</foo>", nil},
@@ -209,11 +209,7 @@ func TestV017FormattingNeighbours(t *testing.T) {
 			result := v020TextBlock(t, tc.raw)
 			v017Run(t, result, "current", tc.want, 1)
 			if tc.raw == ". <em>.</em> ." {
-				for _, entry := range result.Diagnostics {
-					if entry.DiagnosticCode == "V003" {
-						t.Fatal("V017 must cover these spaces independently of V003")
-					}
-				}
+				visibleExpect(t, result, "current", "V003", []visibleExpectation{{Range: [2]int{1, 15}}})
 			}
 		})
 	}
@@ -292,7 +288,7 @@ func TestV017BoundariesAndNesting(t *testing.T) {
 		{"block separator", []model.Line{
 			v017Line(t, "@example {", "block-start", 2, 1,
 				v017Element(t, "tag", "@example", "example", 1), v017Element(t, "block-open", "{", "{", 10)),
-			v017Text(t, "Wait . . .", "Wait . . .", 3, 2),
+			v017Text(t, "Wait ,", "Wait ,", 3, 2),
 			v017Line(t, "---", "separator", 3, 2),
 			v017Text(t, "Wait !", "Wait !", 3, 2),
 			v017Line(t, "}", "block-end", 3, 2, v017Element(t, "block-close", "}", "}", 1)),

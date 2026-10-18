@@ -20,13 +20,15 @@ func registrationV027(registry *diagnostics.Registry) error {
 	})
 }
 
-// checkV027 сопоставляет кавычки в целых Raw строк, без разбора HTML и DSL.
+// checkV027 сопоставляет кавычки в целых строках, сохраняя границы DSL.
+// Разрешённое форматирование в text прозрачно для кавычек и апострофов.
 // Основной и связанный диапазоны отмечают по одному исходному символу;
 // Unicode-колонки начинаются с 1, правые границы исключаются.
 func checkV027(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
 		raw := []rune(line.Raw())
+		raw, positions := visibleText(raw, textFormatting(lines, line, raw), 0, len(raw))
 		excluded := v027Apostrophes(raw)
 		opening := -1
 		for i, char := range raw {
@@ -36,12 +38,12 @@ func checkV027(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			if opening >= 0 {
 				if i > opening+1 && !unicode.IsSpace(raw[i-1]) &&
 					(i+1 == len(raw) || unicode.IsSpace(raw[i+1]) || unicode.IsPunct(raw[i+1])) {
-					occurrence, err := findings.Add(number, opening+1, number, opening+2,
+					occurrence, err := findings.Add(number, positions[opening]+1, number, positions[opening]+2,
 						"Для выделения фрагмента используйте двойные кавычки; внутрисловные апострофы сохраните")
 					if err != nil {
 						return err
 					}
-					if err := findings.AddRelated(occurrence, number, i+1, number, i+2); err != nil {
+					if err := findings.AddRelated(occurrence, number, positions[i]+1, number, positions[i]+2); err != nil {
 						return err
 					}
 					opening = -1

@@ -19,20 +19,22 @@ func registrationV029(registry *diagnostics.Registry) error {
 	})
 }
 
-// v029Part хранит исходный диапазон цифровой части [start,end) в индексах рун.
+// v029Part хранит диапазон цифровой части [start,end) в индексах видимых рун.
 // word означает примыкание буквы или комбинируемого знака к её границе.
 type v029Part struct {
 	start, end int
 	word       bool
 }
 
-// checkV029 проверяет Raw всех строк без нормализации и разбора DSL-разметки.
+// checkV029 проверяет все строки без нормализации числовых частей.
+// Разрешённое форматирование в text прозрачно для чисел и промежутков.
 // Из максимальных цепочек через U+2013 рассматриваются только пары частей.
 // Выделяется промежуток между ними в Unicode-колонках с 1, конец исключается.
 func checkV029(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
 		text := []rune(line.Raw())
+		text, positions := visibleText(text, textFormatting(lines, line, text), 0, len(text))
 		parts := v029Parts(text)
 		for first := 0; first < len(parts); {
 			last := first
@@ -43,7 +45,7 @@ func checkV029(lines diagnostics.Lines, findings diagnostics.Findings) error {
 				start, end := parts[first].end, parts[last].start
 				// Единственный знак тире без пробелов не требует рекомендации.
 				if end-start > 1 {
-					if _, err := findings.Add(number, start+1, number, end+1,
+					if _, err := findings.Add(number, positions[start]+1, number, positions[end-1]+2,
 						"Для числового диапазона рекомендуется запись без пробелов: 1–12"); err != nil {
 						return err
 					}

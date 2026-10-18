@@ -110,7 +110,7 @@ func TestV024Blocks(t *testing.T) {
 		name, tag, raw string
 		want           []v024Expected
 	}{
-		{"HTML not transparent", "text", "a<em>\u0301</em>", []v024Expected{{4, 6, 7, "Коды знаков: U+0301."}}},
+		{"HTML preserves letter base", "text", "a<em>\u0301</em>", nil},
 		{"letter inside formatting", "text", "<em>a\u0301</em>", nil},
 		{"HTML-like source in editor", "editor", "<a\u0301>", nil},
 		{"comment is checked", "editor", "\u0301a", []v024Expected{{4, 1, 2, "Коды знаков: U+0301."}}},

@@ -20,12 +20,15 @@ func registrationV022(registry *diagnostics.Registry) error {
 	})
 }
 
-// checkV022 проверяет целые исходные строки без разбора HTML и полей DSL.
+// checkV022 проверяет Raw вне распознанных идентификаторов и путей.
+// Разрешённое форматирование в text прозрачно. Экранирование не декодируется,
+// unparsed остаётся проверяемым текстом.
 // Диапазон охватывает весь токен в Unicode-колонках с 1; конец исключается.
 func checkV022(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
-		raw := []rune(line.Raw())
+		raw := ocrText(line)
+		raw, positions := visibleText(raw, textFormatting(lines, line, raw), 0, len(raw))
 		for i := 0; i < len(raw); {
 			if !unicode.IsLetter(raw[i]) && !unicode.IsDigit(raw[i]) {
 				i++
@@ -36,7 +39,7 @@ func checkV022(lines diagnostics.Lines, findings diagnostics.Findings) error {
 				i++
 			}
 			if detail := v022TokenDetail(raw[start:i]); detail != "" {
-				if _, err := findings.Add(number, start+1, number, i+1, detail); err != nil {
+				if _, err := findings.Add(number, positions[start]+1, number, positions[i-1]+2, detail); err != nil {
 					return err
 				}
 			}

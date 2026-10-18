@@ -16,12 +16,14 @@ func registrationV028(registry *diagnostics.Registry) error {
 
 // checkV028 отмечает максимальные последовательности U+0020 непосредственно
 // после ( или [ либо перед ) или ] во всём Raw, включая unparsed.
+// Разрешённое форматирование в text прозрачно для соседства со скобкой.
 // Единственные исключения — ( ) и [ ] с одним U+0020. Парность не проверяется.
 // Диапазон охватывает только пробелы в Unicode-колонках с 1; конец исключается.
 func checkV028(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
 		runes := []rune(line.Raw())
+		runes, positions := visibleText(runes, textFormatting(lines, line, runes), 0, len(runes))
 		for i := 0; i < len(runes); {
 			if runes[i] != ' ' {
 				i++
@@ -46,8 +48,15 @@ func checkV028(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			} else if beforeClosing {
 				detail = "Перед закрывающей скобкой"
 			}
-			if _, err := findings.Add(number, start+1, number, i+1, detail); err != nil {
-				return err
+			for start < i {
+				end := start + 1
+				for end < i && positions[end] == positions[end-1]+1 {
+					end++
+				}
+				if _, err := findings.Add(number, positions[start]+1, number, positions[end-1]+2, detail); err != nil {
+					return err
+				}
+				start = end
 			}
 		}
 	}

@@ -19,10 +19,11 @@ func registrationV014(registry *diagnostics.Registry) error {
 	})
 }
 
-// checkV014 проверяет U+2013 и U+2014 в точном Raw всех строк, кроме separator.
+// checkV014 проверяет U+2013 и U+2014 во всех строках, кроме separator.
 // Тире между буквенными частями отмечается, если хотя бы одна содержит больше
 // одной буквы; сочетание буквенной части и пробельного символа отмечается всегда.
-// HTML, пути, unparsed и фонетические записи не исключаются и не преобразуются.
+// Разрешённое форматирование в text прозрачно. Пути, unparsed и фонетические
+// записи не исключаются; неподдерживаемая разметка остаётся буквальным текстом.
 // Диапазон содержит один знак; Unicode-колонки начинаются с 1, конец исключается.
 func checkV014(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
@@ -31,6 +32,7 @@ func checkV014(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			continue
 		}
 		text := []rune(line.Raw())
+		text, positions := visibleText(text, textFormatting(lines, line, text), 0, len(text))
 		for i := 1; i+1 < len(text); i++ {
 			if text[i] != '\u2013' && text[i] != '\u2014' {
 				continue
@@ -41,7 +43,7 @@ func checkV014(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			if !betweenLetters && !besideSpace {
 				continue
 			}
-			if _, err := findings.Add(number, i+1, number, i+2,
+			if _, err := findings.Add(number, positions[i]+1, number, positions[i]+2,
 				"Если это составное слово, используйте дефис; если граница частей фразы — проверьте пробелы вокруг тире"); err != nil {
 				return err
 			}

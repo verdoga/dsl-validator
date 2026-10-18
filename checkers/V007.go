@@ -1,6 +1,7 @@
 package checkers
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 
@@ -26,7 +27,7 @@ func registrationV007(registry *diagnostics.Registry) error {
 func checkV007(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
-		marker := v007ListMarker(line)
+		marker := v007ListMarker(lines, line)
 		var openings []int
 		column := 1
 		for _, char := range line.Raw() {
@@ -59,11 +60,13 @@ func checkV007(lines diagnostics.Lines, findings diagnostics.Findings) error {
 // v007ListMarker возвращает Unicode-колонку скобки начального маркера списка
 // в первом content либо 0. Маркер — число или одна буква, затем ')' и пробел
 // либо табуляция перед непустым текстом. Служебные значения не распознаются.
-func v007ListMarker(line diagnostics.Line) int {
+// Разрешённое форматирование в text не прерывает маркер и следующий пробел.
+func v007ListMarker(lines diagnostics.Lines, line diagnostics.Line) int {
 	if line.Type() != "content" && line.Type() != "tag" {
 		return 0
 	}
 	raw := []rune(line.Raw())
+	visible, positions := visibleText(raw, textFormatting(lines, line, raw), 0, len(raw))
 	for index := 0; index < line.ElementCount(); index++ {
 		element, _ := line.Element(index)
 		if element.Type() != "content" {
@@ -73,32 +76,33 @@ func v007ListMarker(line diagnostics.Line) int {
 		if line.Type() == "content" && strings.Trim(string(raw[:start]), " \t") != "" {
 			return 0
 		}
-		for start < end && (raw[start] == ' ' || raw[start] == '\t') {
+		start, end = sort.SearchInts(positions, start), sort.SearchInts(positions, end)
+		for start < end && (visible[start] == ' ' || visible[start] == '\t') {
 			start++
 		}
 		if start == end {
 			return 0
 		}
-		if unicode.IsLetter(raw[start]) {
+		if unicode.IsLetter(visible[start]) {
 			start++
-		} else if unicode.IsDigit(raw[start]) {
-			for start < end && unicode.IsDigit(raw[start]) {
+		} else if unicode.IsDigit(visible[start]) {
+			for start < end && unicode.IsDigit(visible[start]) {
 				start++
 			}
 		} else {
 			return 0
 		}
-		if start == end || raw[start] != ')' {
+		if start == end || visible[start] != ')' {
 			return 0
 		}
 		text := start + 1
-		for text < len(raw) && (raw[text] == ' ' || raw[text] == '\t') {
+		for text < len(visible) && (visible[text] == ' ' || visible[text] == '\t') {
 			text++
 		}
-		if text == start+1 || text == len(raw) {
+		if text == start+1 || text == len(visible) {
 			return 0
 		}
-		return start + 1
+		return positions[start] + 1
 	}
 	return 0
 }

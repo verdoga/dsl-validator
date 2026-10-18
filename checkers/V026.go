@@ -15,7 +15,7 @@ func registrationV026(registry *diagnostics.Registry) error {
 	})
 }
 
-// checkV026 проверяет весь Raw без преобразований и контекстных исключений.
+// checkV026 проверяет все строки; разрешённое форматирование в text прозрачно.
 // Максимальная цепочка одинаковых знаков даёт одно сообщение, кроме одиночного
 // знака и ровно трёх U+002E. Диапазон задаётся исходными Unicode-колонками с 1
 // и исключающей правой границей; между строками цепочки не продолжаются.
@@ -23,6 +23,7 @@ func checkV026(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
 		raw := []rune(line.Raw())
+		raw, positions := visibleText(raw, textFormatting(lines, line, raw), 0, len(raw))
 		for start := 0; start < len(raw); {
 			switch raw[start] {
 			case '.', ',', ';', ':', '!', '?', '…':
@@ -36,7 +37,7 @@ func checkV026(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			}
 			length := end - start
 			if length > 1 && !(raw[start] == '.' && length == 3) {
-				if _, err := findings.Add(number, start+1, number, end+1, ""); err != nil {
+				if _, err := findings.Add(number, positions[start]+1, number, positions[end-1]+2, ""); err != nil {
 					return err
 				}
 			}

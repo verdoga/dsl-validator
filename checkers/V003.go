@@ -21,23 +21,25 @@ func registrationV003(registry *diagnostics.Registry) error {
 
 // checkV003 проверяет Raw всех строк, включая комментарии и вложенное содержимое.
 // Технические диапазоны исключаются без соединения оставшихся участков.
+// Разрешённое форматирование в text прозрачно для точек и пробелов.
 // Порядок и непересечение элементов гарантированы штатным контролем модели.
 func checkV003(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
 		raw := []rune(line.Raw())
+		formatting := textFormatting(lines, line, raw)
 		start := 0
 		for index := 0; index < line.ElementCount(); index++ {
 			element, _ := line.Element(index)
 			if !v003Excluded(element.Type()) || element.Start() == element.End() {
 				continue
 			}
-			if err := v003CheckSection(raw, start, element.Start()-1, number, findings); err != nil {
+			if err := v003CheckSection(raw, formatting, start, element.Start()-1, number, findings); err != nil {
 				return err
 			}
 			start = element.End() - 1
 		}
-		if err := v003CheckSection(raw, start, len(raw), number, findings); err != nil {
+		if err := v003CheckSection(raw, formatting, start, len(raw), number, findings); err != nil {
 			return err
 		}
 	}
@@ -58,17 +60,18 @@ func v003Excluded(kind string) bool {
 // Максимальная цепочка содержит не менее трёх точек и хотя бы один внутренний
 // промежуток из U+0009 или Zs. Внешние пробелы в срабатывание не входят.
 // Findings получает Unicode-колонки с 1 и исключающую правую границу.
-func v003CheckSection(raw []rune, start, end, number int, findings diagnostics.Findings) error {
-	for index := start; index < end; {
-		if raw[index] != '.' {
+func v003CheckSection(raw []rune, formatting []bool, start, end, number int, findings diagnostics.Findings) error {
+	text, positions := visibleText(raw, formatting, start, end)
+	for index := 0; index < len(text); {
+		if text[index] != '.' {
 			index++
 			continue
 		}
 		first, last, dots := index, index, 1
 		spaced := false
 		index++
-		for index < end {
-			char := raw[index]
+		for index < len(text) {
+			char := text[index]
 			if char == '.' {
 				spaced = spaced || index-last > 1
 				last = index
@@ -79,7 +82,7 @@ func v003CheckSection(raw []rune, start, end, number int, findings diagnostics.F
 			index++
 		}
 		if dots >= 3 && spaced {
-			if _, err := findings.Add(number, first+1, number, last+2, ""); err != nil {
+			if _, err := findings.Add(number, positions[first]+1, number, positions[last]+2, ""); err != nil {
 				return err
 			}
 		}

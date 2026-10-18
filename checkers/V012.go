@@ -29,7 +29,7 @@ func checkV012(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		line, _ := lines.Line(number)
 		raw := []rune(line.Raw())
 		_, answers := v015PlaceholderContext(lines, line)
-		formatting := v019Formatting(lines, line, raw)
+		formatting := textFormatting(lines, line, raw)
 		for index := 0; index < line.ElementCount(); index++ {
 			element, _ := line.Element(index)
 			switch element.Type() {
@@ -42,7 +42,7 @@ func checkV012(lines diagnostics.Lines, findings diagnostics.Findings) error {
 				if part.answer {
 					markers = nil // В ANSWER угловые скобки являются данными.
 				}
-				text, positions := v019Visible(raw, markers, part.start, part.end)
+				text, positions := visibleText(raw, markers, part.start, part.end)
 				for i, char := range text {
 					if char != '-' && char != '—' {
 						continue

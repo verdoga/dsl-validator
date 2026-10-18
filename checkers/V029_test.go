@@ -146,7 +146,7 @@ func TestV029Blocks(t *testing.T) {
 		name, tag, raw string
 		want           []v029Expected
 	}{
-		{"HTML is not transparent", "text", "1<em> – </em>2", nil},
+		{"HTML preserves numeric range", "text", "1<em> – </em>2", []v029Expected{{4, 6, 9}}},
 		{"range inside HTML", "text", "<em>1 – 2</em>", []v029Expected{{4, 6, 9}}},
 		{"table is one raw line", "table", "1 – 2 | текст", []v029Expected{{4, 2, 5}}},
 		{"table cells do not form chain", "table", "1 – 2 | 3 – 4", []v029Expected{{4, 2, 5}, {4, 10, 13}}},

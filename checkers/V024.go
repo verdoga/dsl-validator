@@ -21,22 +21,26 @@ func registrationV024(registry *diagnostics.Registry) error {
 	})
 }
 
-// checkV024 проверяет точный Raw всех строк без разбора разметки и нормализации.
+// checkV024 проверяет все строки без Unicode-нормализации. Разрешённое
+// форматирование в text прозрачно для связи диакритики с буквой-основой.
 // Любая L устанавливает основу, M сохраняет её, остальные символы сбрасывают.
 // Диапазоны групп без основы заданы в Unicode-колонках с 1, конец исключается.
 func checkV024(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
 		text := []rune(line.Raw())
+		text, positions := visibleText(text, textFormatting(lines, line, text), 0, len(text))
 		base := false
 		for i := 0; i < len(text); {
 			char := text[i]
 			if !base && v024Diacritic(char) {
 				start := i
-				for i < len(text) && v024Diacritic(text[i]) {
+				i++
+				// Диапазон группы включает только знаки, без HTML-маркеров.
+				for i < len(text) && v024Diacritic(text[i]) && positions[i] == positions[i-1]+1 {
 					i++
 				}
-				if _, err := findings.Add(number, start+1, number, i+1, v024Detail(text[start:i])); err != nil {
+				if _, err := findings.Add(number, positions[start]+1, number, positions[i-1]+2, v024Detail(text[start:i])); err != nil {
 					return err
 				}
 				continue

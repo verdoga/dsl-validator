@@ -30,7 +30,7 @@ func checkV020(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			continue
 		}
 		raw := []rune(line.Raw())
-		first, positions := v019Visible(raw, v019Formatting(lines, line, raw), 0, len(raw))
+		first, positions := visibleText(raw, textFormatting(lines, line, raw), 0, len(raw))
 		start, end, found := v020Tail(first)
 		if !found || v020Excluded(line, positions[start], positions[end]+1) {
 			continue
@@ -48,7 +48,7 @@ func checkV020(lines diagnostics.Lines, findings diagnostics.Findings) error {
 				break
 			}
 			raw := []rune(continuation.Raw())
-			second, secondPositions := v019Visible(raw, v019Formatting(lines, continuation, raw), 0, len(raw))
+			second, secondPositions := visibleText(raw, textFormatting(lines, continuation, raw), 0, len(raw))
 			secondStart, secondEnd, found := v020Head(second)
 			if found && firstLetters+v020LetterCount(second[secondStart:secondEnd]) >= 3 &&
 				!v020Excluded(continuation, secondPositions[secondStart], secondPositions[secondEnd-1]+1) &&
