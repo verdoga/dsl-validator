@@ -57,7 +57,7 @@ func TestV002TextSequences(t *testing.T) {
 		{"case does not affect tabs", "READ\tTHIS.", [][3]int{{3, 5, 6}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			v002Run(t, v002Document(t, v002Text(t, tc.raw, 2, 1)), "current", tc.want)
+			v002Run(t, v002Document(t, v002Text(t, tc.raw, 2, 1)), "current", tc.want, 1)
 		})
 	}
 }
@@ -131,7 +131,7 @@ func TestV002RawAndStructure(t *testing.T) {
 		}, [][3]int{{3, 10, 11}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			v002Run(t, v002Document(t, tc.body...), "current", tc.want)
+			v002Run(t, v002Document(t, tc.body...), "current", tc.want, 1)
 		})
 	}
 }
@@ -161,7 +161,7 @@ func TestV002InvalidUnparsedLines(t *testing.T) {
 				Location:         &model.Location{Start: model.Position{Line: 3, Column: 1}, End: model.Position{Line: 3, Column: 11}},
 				RelatedLocations: []model.Location{},
 			}}
-			v002Run(t, result, "current", tc.want)
+			v002Run(t, result, "current", tc.want, 1)
 		})
 	}
 }
@@ -170,7 +170,7 @@ func TestV002FirstAndLastLines(t *testing.T) {
 	result := v002Document(t, v002Line(t, "A\t", "content", 2, 1, v002Element(t, "content", "A", "A", 1, 2)))
 	result.Lines[0].Raw = "@dsl-version 1.2\t"
 	result.Lines[2].LineEnding = model.LineEndingNone
-	v002Run(t, result, "current", [][3]int{{1, 17, 18}, {3, 2, 3}})
+	v002Run(t, result, "current", [][3]int{{1, 17, 18}, {3, 2, 3}}, 1)
 }
 
 func TestV002Heading(t *testing.T) {
@@ -179,7 +179,7 @@ func TestV002Heading(t *testing.T) {
 	result.Lines[1].Elements[1] = v002Element(t, "title", "Unit\t1", "Unit\t1", 3, 9)
 	title := "Unit\t1"
 	result.Document.Metadata.Title = &title
-	v002Run(t, result, "current", [][3]int{{2, 7, 8}})
+	v002Run(t, result, "current", [][3]int{{2, 7, 8}}, 1)
 }
 
 func TestV002LineEndings(t *testing.T) {
@@ -198,14 +198,14 @@ func TestV002LineEndings(t *testing.T) {
 			for i, eol := range tc.eols {
 				result.Lines[i].LineEnding = eol
 			}
-			v002Run(t, result, "current", [][3]int{{3, 5, 6}})
+			v002Run(t, result, "current", [][3]int{{3, 5, 6}}, 1)
 		})
 	}
 }
 
 func TestV002UnavailableLines(t *testing.T) {
 	// Допустимое отсутствие доступных строк с известной версией, а не выдуманный DSL.
-	v002Run(t, v002UnavailableDocument(t, "1.2"), "current", nil)
+	v002Run(t, v002UnavailableDocument(t, "1.2"), "current", nil, 0)
 }
 
 func TestV002UnsupportedVersions(t *testing.T) {
@@ -226,7 +226,7 @@ func TestV002UnsupportedVersions(t *testing.T) {
 
 func TestV002CoexistsWithV001(t *testing.T) {
 	result := v002Document(t, v002Text(t, "A\t  \tB", 2, 1))
-	v002Run(t, result, "current", [][3]int{{3, 2, 3}, {3, 5, 6}})
+	v002Run(t, result, "current", [][3]int{{3, 2, 3}, {3, 5, 6}}, 1)
 	matches := 0
 	want := model.Location{Start: model.Position{Line: 3, Column: 3}, End: model.Position{Line: 3, Column: 5}}
 	for _, entry := range result.Diagnostics {
@@ -247,10 +247,10 @@ func TestV002CoexistsWithV001(t *testing.T) {
 
 func TestV002RepeatedRunsPreserveHistory(t *testing.T) {
 	result := v002Document(t, v002Text(t, "Read\tthis.", 2, 1))
-	v002Run(t, result, "first", [][3]int{{3, 5, 6}})
-	v002Run(t, result, "second", [][3]int{{3, 5, 6}})
+	v002Run(t, result, "first", [][3]int{{3, 5, 6}}, 1)
+	v002Run(t, result, "second", [][3]int{{3, 5, 6}}, 1)
 	// Новый документ не наследует срабатывания предыдущих запусков.
-	v002Run(t, v002Document(t, v002Text(t, "Read this.", 2, 1)), "first", nil)
+	v002Run(t, v002Document(t, v002Text(t, "Read this.", 2, 1)), "first", nil, 1)
 }
 
 // v002UnavailableDocument сохраняет известную версию при недоступном исходнике.
@@ -338,10 +338,13 @@ func v002Text(t *testing.T, text string, parent, depth int) model.Line {
 
 // v002Run проверяет штатный конвейер и явные тройки: строка, начало, конец.
 // Правая граница исключается. Проверяются только V002 текущего запуска;
-// прежние результаты, строки, флаги и ссылки должны сохраниться без изменений.
-func v002Run(t *testing.T, result *model.Result, processingID string, want [][3]int) {
+// прежние результаты, строки и ссылки должны сохраниться без изменений.
+// wantV037 задаёт точное число сопутствующих ошибок отсутствующего ID;
+// флаг документа проверяется отдельно, строки и прежняя история сохраняются.
+func v002Run(t *testing.T, result *model.Result, processingID string, want [][3]int, wantV037 int) {
 	t.Helper()
 	before := v002Snapshot(t, result)
+	oldDocumentError := result.Document.HasErrors
 	processingCount, diagnosticCount := len(result.Processing), len(result.Diagnostics)
 	checks, err := validator.Prepare(result, v002Registry(t))
 	if err != nil {
@@ -355,6 +358,7 @@ func v002Run(t *testing.T, result *model.Result, processingID string, want [][3]
 		t.Fatalf("Run: %v", err)
 	}
 	var got []model.Diagnostic
+	gotV037 := 0
 	seenIDs := make(map[string]bool)
 	for i, entry := range result.Diagnostics {
 		if entry.ID == "" || seenIDs[entry.ID] {
@@ -364,9 +368,20 @@ func v002Run(t *testing.T, result *model.Result, processingID string, want [][3]
 		if i >= diagnosticCount && entry.DiagnosticCode == "V002" && entry.Source != processingID {
 			t.Fatalf("new V002 has source %q, want %q", entry.Source, processingID)
 		}
+		if entry.DiagnosticCode == "V037" && entry.Source == processingID {
+			gotV037++
+			if entry.SeverityLevel != "error" || entry.DiagnosticScope != "document" ||
+				entry.Message != "В документе отсутствует @document-id." || entry.Location != nil ||
+				entry.Fatal || entry.RelatedLocations == nil || len(entry.RelatedLocations) != 0 {
+				t.Errorf("unexpected accompanying V037: %+v", entry)
+			}
+		}
 		if entry.DiagnosticCode == "V002" && entry.Source == processingID {
 			got = append(got, entry)
 		}
+	}
+	if gotV037 != wantV037 {
+		t.Fatalf("current V037 count = %d, want %d", gotV037, wantV037)
 	}
 	if len(got) != len(want) {
 		t.Fatalf("current V002 count = %d, want %d; diagnostics: %+v", len(got), len(want), got)
@@ -389,7 +404,11 @@ func v002Run(t *testing.T, result *model.Result, processingID string, want [][3]
 	if len(result.Processing) != processingCount+1 {
 		t.Fatal("unexpected processing count")
 	}
+	if result.Document.HasErrors != (oldDocumentError || wantV037 > 0) {
+		t.Errorf("document.hasErrors = %v, want %v", result.Document.HasErrors, oldDocumentError || wantV037 > 0)
+	}
 	previous := *result
+	previous.Document.HasErrors = oldDocumentError
 	previous.Processing = result.Processing[:processingCount]
 	previous.Diagnostics = result.Diagnostics[:diagnosticCount]
 	if v002Snapshot(t, &previous) != before {
