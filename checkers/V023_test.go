@@ -254,7 +254,7 @@ func TestV023TitleNameIdentifierAndPath(t *testing.T) {
 	t.Run("identifier", func(t *testing.T) {
 		v023Run(t, v023Document(t, v023Line(t, "@task 1O5", "tag", 2, 1,
 			v023Element(t, "tag", "@task", "task", 1, 6), v023Element(t, "identifier", "1O5", "1O5", 7, 10))),
-			"current", []v023Expected{{3, 7, 10, "O → 0"}})
+			"current", nil)
 	})
 	for _, tc := range []struct {
 		name string
@@ -266,7 +266,7 @@ func TestV023TitleNameIdentifierAndPath(t *testing.T) {
 			[]v023Expected{{2, 10, 13, "O → 0"}}},
 		{"resource path", v023Line(t, `@resource-dir "1O5"`, "tag", 0, 0,
 			v023Element(t, "tag", "@resource-dir", "resource-dir", 1, 14),
-			v023Element(t, "resource-path", `"1O5"`, "1O5", 15, 20)), []v023Expected{{2, 16, 19, "O → 0"}}},
+			v023Element(t, "resource-path", `"1O5"`, "1O5", 15, 20)), nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// DSL 1.31: метаданные располагаются до заголовка первого уровня.

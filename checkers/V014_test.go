@@ -183,13 +183,13 @@ func TestV014RawAndStructure(t *testing.T) {
 	}
 }
 
-func TestV014HTMLIsNotInterpreted(t *testing.T) {
+func TestV014HTMLNeighbours(t *testing.T) {
 	// DSL 3.6: содержимое @text допускает корректно вложенные HTML-теги.
 	for _, tc := range []struct {
 		name, raw string
 		want      [][3]int
 	}{
-		{"markers interrupt adjacency", "северо<strong>–</strong>западный", nil},
+		{"formatting preserves adjacency", "северо<strong>–</strong>западный", [][3]int{{4, 15, 16}}},
 		{"text between markers is checked", "<em>аб—вг</em>", [][3]int{{4, 7, 8}}},
 		{"uppercase markers", "<EM>аб—вг</EM>", [][3]int{{4, 7, 8}}},
 		{"literal angle brackets are not excluded", `\<ab—cd\>`, [][3]int{{4, 5, 6}}},

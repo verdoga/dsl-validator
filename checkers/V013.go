@@ -19,8 +19,8 @@ func registrationV013(registry *diagnostics.Registry) error {
 }
 
 // checkV013 отмечает U+002D с горизонтальным пробелом непосредственно с обеих
-// сторон в точном Raw всех строк, кроме структурных разделителей. Буквы,
-// числа, HTML и классификация элементов не влияют на проверку. Диапазон
+// сторон во всех строках, кроме структурных разделителей. Разрешённое
+// форматирование в text прозрачно; буквы и числа не влияют на проверку. Диапазон
 // охватывает один символ в Unicode-колонках с 1; правая граница исключается.
 func checkV013(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
@@ -29,12 +29,13 @@ func checkV013(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			continue
 		}
 		runes := []rune(line.Raw())
+		runes, positions := visibleText(runes, textFormatting(lines, line, runes), 0, len(runes))
 		for i := 1; i+1 < len(runes); i++ {
 			// Пробелы с обеих сторон также исключают последовательности дефисов.
 			if runes[i] != '-' || !v013HorizontalSpace(runes[i-1]) || !v013HorizontalSpace(runes[i+1]) {
 				continue
 			}
-			if _, err := findings.Add(number, i+1, number, i+2,
+			if _, err := findings.Add(number, positions[i]+1, number, positions[i]+2,
 				"Для разделения частей фразы рекомендуется короткое тире –"); err != nil {
 				return err
 			}

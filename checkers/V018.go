@@ -1,6 +1,7 @@
 package checkers
 
 import (
+	"sort"
 	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
@@ -31,7 +32,8 @@ func checkV018(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if !answers && v016InsideText(lines, line) {
 			html = v016HTMLMarkers(line, raw)
 		}
-		text := v018TextScan{raw: raw, html: html}
+		visible, positions := visibleText(raw, html, 0, len(raw))
+		text := v018TextScan{raw: visible, positions: positions}
 		var previous diagnostics.Element
 		for index := 0; index < line.ElementCount(); index++ {
 			element, _ := line.Element(index)
@@ -95,19 +97,23 @@ func v018AcrossPlaceholder(raw []rune, previous, current diagnostics.Element) bo
 }
 
 // v018TextScan хранит состояние обхода строки с независимыми ответами.
-// missing содержит индексы рун исходной строки, html — позиции HTML-маркеров.
+// raw содержит видимые символы, positions — их исходные индексы рун.
+// missing содержит индексы рун исходной строки.
 type v018TextScan struct {
-	raw     []rune
-	html    []bool
-	quotes  [2]bool // Открытые прямые одинарная и двойная кавычки.
-	missing []int
+	raw       []rune
+	positions []int
+	quotes    [2]bool // Открытые прямые одинарная и двойная кавычки.
+	missing   []int
 }
 
-// scan проверяет [start,end). hardEnd=true завершает самостоятельный ответ;
+// scan проверяет [start,end) в исходных индексах рун с 0.
+// hardEnd=true завершает самостоятельный ответ;
 // иначе символ за концом элемента учитывается, как и пробел в Raw вне элемента.
 func (text *v018TextScan) scan(start, end int, hardEnd bool) {
+	start, end = sort.SearchInts(text.positions, start), sort.SearchInts(text.positions, end)
+	addresses := v018Addresses(text.raw[start:end])
 	for i := start; i < end; {
-		if len(text.html) != 0 && text.html[i] {
+		if addresses[i-start] {
 			i++
 			continue
 		}
@@ -124,9 +130,8 @@ func (text *v018TextScan) scan(start, end int, hardEnd bool) {
 		last := i
 		i++
 		for i < end {
-			if len(text.html) != 0 && text.html[i] {
-				i++
-				continue
+			if addresses[i-start] {
+				break
 			}
 			if v018Punctuation(text.raw[i]) {
 				last = i
@@ -148,7 +153,7 @@ func (text *v018TextScan) scan(start, end int, hardEnd bool) {
 		if i == end && hardEnd || i == len(text.raw) || v018HorizontalSpace(text.raw[i]) {
 			continue
 		}
-		text.missing = append(text.missing, last)
+		text.missing = append(text.missing, text.positions[last])
 	}
 }
 
@@ -164,7 +169,8 @@ func v018Punctuation(char rune) bool {
 
 // v018Quote обновляет состояние прямой кавычки и возвращает true при закрытии.
 // false означает открытие либо обычный символ; апостроф внутри слова и
-// экранированная кавычка не меняют состояние.
+// экранированная кавычка не меняют состояние. Завершающая кавычка после
+// пунктуации допустима и без парной открывающей: V018 не проверяет их парность.
 func v018Quote(raw []rune, i int, quotes *[2]bool) bool {
 	if raw[i] != '\'' && raw[i] != '"' || v015Escaped(raw, i) {
 		return false
@@ -178,7 +184,10 @@ func v018Quote(raw []rune, i int, quotes *[2]bool) bool {
 	if raw[i] == '"' {
 		index = 1
 	}
-	closed := quotes[index]
+	closed := quotes[index] || i > 0 &&
+		(v018Punctuation(raw[i-1]) || unicode.In(raw[i-1], unicode.Pe, unicode.Pf)) &&
+		(i+1 == len(raw) || v018HorizontalSpace(raw[i+1]) ||
+			unicode.In(raw[i+1], unicode.Pe, unicode.Pf) || v018Punctuation(raw[i+1]) || raw[i+1] == '\'' || raw[i+1] == '"')
 	quotes[index] = !closed
 	return closed
 }

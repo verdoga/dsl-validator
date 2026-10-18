@@ -125,7 +125,7 @@ func TestV022WholeLinesAndContexts(t *testing.T) {
 	t.Run("media path", func(t *testing.T) {
 		line := v022Line(t, "@media audio he1o.wav", "tag", 2, 1,
 			v022Element(t, "tag", "@media", "media", 1), v022Element(t, "media-type", "audio", "audio", 8), v022Element(t, "source", "he1o.wav", "he1o.wav", 14))
-		v022Run(t, v022Document(t, line), "current", []v022Expected{{3, 14, 18, "Подозрительные цифры: 1 → l/i/і."}}, 1)
+		v022Run(t, v022Document(t, line), "current", nil, 1)
 	})
 	for _, tc := range []struct {
 		name, tag, raw string
@@ -175,7 +175,11 @@ func TestV022WholeLinesAndContexts(t *testing.T) {
 			line := v022Line(t, "@"+tc.tag+" "+value, "tag", 0, 0, v022Element(t, "tag", "@"+tc.tag, tc.tag, 1), v022Element(t, model.ElementType(tc.kind), value, value, tc.start))
 			result.Lines = append(result.Lines[:1], line, result.Lines[1])
 			v022NumberLines(t, result)
-			v022Run(t, result, "current", []v022Expected{{2, tc.start, tc.end, "Подозрительные цифры: 1 → l/i/і."}}, tc.wantV037)
+			var want []v022Expected
+			if tc.kind == "name" {
+				want = []v022Expected{{2, tc.start, tc.end, "Подозрительные цифры: 1 → l/i/і."}}
+			}
+			v022Run(t, result, "current", want, tc.wantV037)
 		})
 	}
 	t.Run("unparsed with parser history", func(t *testing.T) {

@@ -27,7 +27,7 @@ func checkV017(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		line, _ := lines.Line(number)
 		raw := []rune(line.Raw())
 		_, answers := v015PlaceholderContext(lines, line)
-		formatting := v019Formatting(lines, line, raw)
+		formatting := textFormatting(lines, line, raw)
 		for index := 0; index < line.ElementCount(); index++ {
 			element, _ := line.Element(index)
 			switch element.Type() {
@@ -52,7 +52,7 @@ func checkV017(lines diagnostics.Lines, findings diagnostics.Findings) error {
 // v017CheckPart ищет пробелы в одном самостоятельном участке. Границы ответа
 // не участвуют в поиске соседей, исходные раздельные пробелы не объединяются.
 func v017CheckPart(raw []rune, formatting []bool, part v015TextPart, number int, findings diagnostics.Findings) error {
-	text, positions := v019Visible(raw, formatting, part.start, part.end)
+	text, positions := visibleText(raw, formatting, part.start, part.end)
 	var following rune
 	if !part.answer && part.end < len(raw) {
 		following = raw[part.end]
@@ -83,13 +83,11 @@ func v017CheckPart(raw []rune, formatting []bool, part v015TextPart, number int,
 			start = end
 		}
 		if text[i] == '.' {
-			// Исключение V003 относится к исходной цепочке: удаление
-			// HTML не должно создавать новую цепочку и скрывать пробелы.
-			end, count, spaced := v017DotChain(raw[:part.end], positions[i])
+			// Внутренние пробелы видимой цепочки из трёх и более точек
+			// проверяет V003, в том числе через разрешённое форматирование.
+			end, count, spaced := v017DotChain(text, i)
 			if count >= 3 && spaced || !spaced {
-				for i < len(text) && positions[i] < end {
-					i++
-				}
+				i = end
 				continue
 			}
 		}
@@ -98,10 +96,11 @@ func v017CheckPart(raw []rune, formatting []bool, part v015TextPart, number int,
 	return nil
 }
 
-// v017StandaloneEllipsis возвращает конец отдельного … или ... после пробела.
+// v017StandaloneEllipsis возвращает конец отдельного … или трёх точек после пробела.
 // Такой образец для продолжения неоднозначен и не требует предупреждения.
-// Возврат start означает обычную пунктуацию. Разнесённые точки, длинные серии
-// и примыкающая пунктуация исключение не получают. following сохраняет границу
+// Между точками допустимы горизонтальные пробелы; их оформление проверяет V003.
+// Возврат start означает обычную пунктуацию. Длинные серии и примыкающая
+// пунктуация исключение не получают. following сохраняет границу
 // внешнего текста; для самостоятельного конца ответа он равен нулю.
 func v017StandaloneEllipsis(text []rune, start int, following rune) int {
 	if start == 0 || !v017HorizontalSpace(text[start-1]) {
@@ -111,10 +110,9 @@ func v017StandaloneEllipsis(text []rune, start int, following rune) int {
 	switch text[start] {
 	case '…':
 	case '.':
-		for end < len(text) && text[end] == '.' {
-			end++
-		}
-		if end-start != 3 {
+		var count int
+		end, count, _ = v017DotChain(text, start)
+		if count != 3 {
 			return start
 		}
 	default:

@@ -19,13 +19,16 @@ func registrationV023(registry *diagnostics.Registry) error {
 	})
 }
 
-// checkV023 проверяет максимальные токены во всём Raw, включая unparsed.
+// checkV023 проверяет максимальные токены Raw, включая unparsed,
+// вне распознанных идентификаторов и путей.
+// Разрешённое форматирование в text не прерывает токен.
 // Конечные точки и запятые не входят в кандидат. Один диапазон охватывает
 // исходный токен в Unicode-колонках с 1; правая граница исключается.
 func checkV023(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
-		runes := []rune(line.Raw())
+		runes := ocrText(line)
+		runes, positions := visibleText(runes, textFormatting(lines, line, runes), 0, len(runes))
 		for i := 0; i < len(runes); {
 			if !v023TokenChar(runes[i]) {
 				i++
@@ -43,7 +46,7 @@ func checkV023(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			if detail == "" {
 				continue
 			}
-			if _, err := findings.Add(number, start+1, number, end+1, detail); err != nil {
+			if _, err := findings.Add(number, positions[start]+1, number, positions[end-1]+2, detail); err != nil {
 				return err
 			}
 		}
