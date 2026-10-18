@@ -17,5 +17,14 @@ func RegistrationCheckers() map[string]diagnostics.RegistrationFunc {
 	return map[string]diagnostics.RegistrationFunc{
 		"V001": registrationV001,
 		"V002": registrationV002,
+		"V010": registrationV010,
+		"V014": registrationV014,
+		"V019": registrationV019,
+		"V024": registrationV024,
+		"V029": registrationV029,
+		"V034": registrationV034,
+		"V038": registrationV038,
+		"V042": registrationV042,
+		"V046": registrationV046,
 	}
 }
