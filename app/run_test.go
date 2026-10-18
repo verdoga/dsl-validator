@@ -98,7 +98,7 @@ func TestRunProcessesJSONAndPreservesHistory(t *testing.T) {
 		if current.Tool != "dsl-validator" || current.Version == nil || *current.Version != "dev" || current.StartedAt == nil || current.DurationMs == nil || *current.DurationMs < 0 {
 			t.Fatalf("invalid processing entry: %+v", current)
 		}
-		want := runReportStart(t) + fmt.Sprintf("ОБРАБОТАН %q, сохранён: да, строк: 3, ошибок: 0, проблем: 0, рекомендаций: 0, время: %d мс\n", path, *current.DurationMs) +
+		want := runReportStart(t) + fmt.Sprintf("ОБРАБОТАН %q, сохранён: да, строк: 4, ошибок: 0, проблем: 0, рекомендаций: 0, время: %d мс\n", path, *current.DurationMs) +
 			"ИТОГО: всего: 1, обработано: 1, сбоев: 0, сохранено: 1, ошибок: 0, проблем: 0, рекомендаций: 0\n"
 		if output != want {
 			t.Fatalf("stdout = %q, want %q", output, want)
@@ -218,16 +218,18 @@ const runValidJSON = `{
   "formatVersion": "1.0",
   "document": {
     "dslVersion": "1.2", "fileName": "input.dsl", "filePath": null,
-    "encoding": "UTF-8", "hasBom": false, "lineCount": 3, "byteLength": null, "sha256": null, "hasErrors": false,
-    "metadata": {"documentId": null, "title": "Unit 1", "subtitle": null, "section": null, "order": null, "resourceDirs": []}
+    "encoding": "UTF-8", "hasBom": false, "lineCount": 4, "byteLength": null, "sha256": null, "hasErrors": false,
+    "metadata": {"documentId": "unit-1", "title": "Unit 1", "subtitle": null, "section": null, "order": null, "resourceDirs": []}
   },
   "processing": [{"id": "p1", "tool": "dsl-parser", "version": null, "startedAt": null, "durationMs": null}],
   "lines": [
     {"line": 1, "type": "tag", "nestingLevel": 0, "parentLine": null, "raw": "@dsl-version 1.2", "eol": "\n", "hasErrors": false,
      "elements": [{"type": "tag", "raw": "@dsl-version", "value": "dsl-version", "start": 1, "end": 13, "errorIds": []}, {"type": "version", "raw": "1.2", "value": "1.2", "start": 14, "end": 17, "errorIds": []}]},
-    {"line": 2, "type": "heading", "nestingLevel": 0, "parentLine": null, "raw": "# Unit 1", "eol": "\n", "hasErrors": false,
+    {"line": 2, "type": "tag", "nestingLevel": 0, "parentLine": null, "raw": "@document-id unit-1", "eol": "\n", "hasErrors": false,
+     "elements": [{"type": "tag", "raw": "@document-id", "value": "document-id", "start": 1, "end": 13, "errorIds": []}, {"type": "identifier", "raw": "unit-1", "value": "unit-1", "start": 14, "end": 20, "errorIds": []}]},
+    {"line": 3, "type": "heading", "nestingLevel": 0, "parentLine": null, "raw": "# Unit 1", "eol": "\n", "hasErrors": false,
      "elements": [{"type": "heading-level", "raw": "#", "value": "1", "start": 1, "end": 2, "errorIds": []}, {"type": "title", "raw": "Unit 1", "value": "Unit 1", "start": 3, "end": 9, "errorIds": []}]},
-    {"line": 3, "type": "content", "nestingLevel": 1, "parentLine": 2, "raw": "Read this sentence.", "eol": "", "hasErrors": false,
+    {"line": 4, "type": "content", "nestingLevel": 1, "parentLine": 3, "raw": "Read this sentence.", "eol": "", "hasErrors": false,
      "elements": [{"type": "content", "raw": "Read this sentence.", "value": "Read this sentence.", "start": 1, "end": 20, "errorIds": []}]}
   ],
   "diagnostics": []

@@ -134,10 +134,18 @@ func TestWriteTemporaryCleansPartialWrite(t *testing.T) {
 		if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &limit); err != nil {
 			t.Fatal(err)
 		}
+		originalLimit := limit
 		limit.Cur = 1024
 		if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &limit); err != nil {
 			t.Fatal(err)
 		}
+		// После проверки ограничение не должно мешать Go записать покрытие
+		// при завершении дочернего тестового процесса, в том числе после Fatal.
+		t.Cleanup(func() {
+			if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &originalLimit); err != nil {
+				t.Errorf("restore file size limit: %v", err)
+			}
+		})
 		temporary, err := writeTemporary(target, bytes.Repeat([]byte("x"), 2048), 0600)
 		if temporary != "" || !errors.Is(err, syscall.EFBIG) {
 			t.Fatalf("partial write = %q, %v; want empty path and EFBIG", temporary, err)

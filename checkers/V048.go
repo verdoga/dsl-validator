@@ -66,6 +66,7 @@ func checkV048(lines diagnostics.Lines, findings diagnostics.Findings) error {
 // v048Opening возвращает каноническое имя блочного тега и индекс первой
 // неэкранированной скобки в рунах с 0; -1 означает отсутствие открытия.
 // Unicode White_Space завершает имя, но начальные отступы — только U+0020/U+0009.
+// Скобки специальной формы ответа исключаются и в ошибочных аргументах.
 func v048Opening(raw []rune) (string, int) {
 	start := 0
 	for start < len(raw) && (raw[start] == ' ' || raw[start] == '\t') {
@@ -87,16 +88,53 @@ func v048Opening(raw []rune) (string, int) {
 		return "", -1
 	}
 	for index := end; index < len(raw); index++ {
-		if raw[index] == '\\' && index+1 < len(raw) {
-			next := raw[index+1]
-			if next == '\\' || next == '{' || next == '}' {
+		if v048Escape(raw, index) {
+			index++
+			continue
+		}
+		if raw[index] == '\\' && index+1 < len(raw) && raw[index+1] == '_' {
+			// Экранирована вся последовательность, но не следующая скобка.
+			index += 2
+			for index < len(raw) && raw[index] == '_' {
 				index++
-				continue
 			}
+			index--
+			continue
+		}
+		if raw[index] == '_' {
+			stop := index + 1
+			for stop < len(raw) && raw[stop] == '_' {
+				stop++
+			}
+			if stop-index == 5 && stop < len(raw) && raw[stop] == '{' {
+				index = v048AfterAnswer(raw, stop+1) - 1
+			} else {
+				index = stop - 1
+			}
+			continue
 		}
 		if raw[index] == '{' {
 			return tag, index
 		}
 	}
 	return "", -1
+}
+
+// v048AfterAnswer возвращает индекс после первой неэкранированной } или длину
+// строки. Ответ не создаёт контекст блока; его парность V048 не проверяет.
+func v048AfterAnswer(raw []rune, start int) int {
+	for index := start; index < len(raw); index++ {
+		if v048Escape(raw, index) {
+			index++
+		} else if raw[index] == '}' {
+			return index + 1
+		}
+	}
+	return len(raw)
+}
+
+// v048Escape возвращает true для пары \\, \{ или \} с данным началом.
+func v048Escape(raw []rune, index int) bool {
+	return raw[index] == '\\' && index+1 < len(raw) &&
+		(raw[index+1] == '\\' || raw[index+1] == '{' || raw[index+1] == '}')
 }

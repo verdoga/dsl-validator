@@ -3,6 +3,7 @@ package checkers
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 	"unicode/utf8"
 
@@ -131,6 +132,38 @@ func TestV048RawRecognition(t *testing.T) {
 	t.Run("Unicode title", func(t *testing.T) {
 		v048Run(t, v048Document(t, v048Open(t, "text", "Я🙂", "title", " x", 2, 1), v048Text(t, "Read.", 3, 2), v048Close(t, 3, 2)),
 			"current", []v048Expected{{3, 10, 11, 12, 13}})
+	})
+}
+
+func TestV048AnswersBeforeBlockOpening(t *testing.T) {
+	// Специальный ответ в инструкции запрещён DSL 4.3.10 и сохранён в
+	// unparsed. Однако условия V048 исключают его скобки и на ошибочной строке.
+	for _, tc := range []struct {
+		name, raw string
+		want      []v048Expected
+	}{
+		{"answer then proper opening", "@multifill _____{yes} {", nil},
+		{"answer then trailing content", "@multifill _____{yes} { x", []v048Expected{{3, 23, 24, 25, 26}}},
+		{"escaped closing in answer", `@multifill _____{a\}b} { x`, []v048Expected{{3, 24, 25, 26, 27}}},
+		{"escaped opening in answer", `@multifill _____{a\{b} { x`, []v048Expected{{3, 24, 25, 26, 27}}},
+		{"paired backslashes in answer", `@multifill _____{a\\} { x`, []v048Expected{{3, 23, 24, 25, 26}}},
+		{"two answers", "@multifill _____{a} _____{b} { x", []v048Expected{{3, 30, 31, 32, 33}}},
+		{"four underscores are not an answer", "@note ____{x", []v048Expected{{3, 11, 12, 12, 13}}},
+		{"six underscores are not an answer", "@note ______{x", []v048Expected{{3, 13, 14, 14, 15}}},
+		{"escaped underscore run is not an answer", `@note \_____{x`, []v048Expected{{3, 13, 14, 14, 15}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v048Run(t, v048Document(t, v048Invalid(t, tc.raw, 2, 1), v048Invalid(t, "}", 2, 1)), "current", tc.want)
+		})
+	}
+	t.Run("answer alone does not enter literal context", func(t *testing.T) {
+		v048Run(t, v048Document(t, v048Invalid(t, "@multifill _____{yes}", 2, 1),
+			v048Open(t, "note", "", "", " x", 2, 1), v048Text(t, "Read.", 4, 2), v048Close(t, 4, 2)),
+			"current", []v048Expected{{4, 7, 8, 9, 10}})
+	})
+	t.Run("unclosed answer does not open a block", func(t *testing.T) {
+		v048Run(t, v048Document(t, v048Invalid(t, "@multifill _____{yes", 2, 1)), "current", nil,
+			v048Parity{3, 17, 18, "Открывающая скобка не имеет закрывающей"})
 	})
 }
 
@@ -493,7 +526,7 @@ func v048Run(t *testing.T, result *model.Result, source string, want []v048Expec
 		}
 		if entry.DiagnosticCode == "V048" {
 			got = append(got, entry)
-		} else if entry.SeverityLevel == "error" {
+		} else if entry.DiagnosticCode == "V005" {
 			others = append(others, entry)
 		}
 	}
@@ -516,7 +549,7 @@ func v048Run(t *testing.T, result *model.Result, source string, want []v048Expec
 	for i, occurrence := range parity {
 		entry := others[i]
 		location := model.Location{Start: model.Position{Line: occurrence.line, Column: occurrence.start}, End: model.Position{Line: occurrence.line, Column: occurrence.end}}
-		if entry.DiagnosticCode != "V005" || entry.DiagnosticScope != "line" || entry.Location == nil || *entry.Location != location ||
+		if entry.DiagnosticCode != "V005" || entry.SeverityLevel != "error" || entry.DiagnosticScope != "line" || entry.Location == nil || *entry.Location != location ||
 			entry.Message != "Нарушено оформление фигурных скобок.\nконкретизация: "+occurrence.detail || entry.Fatal || entry.RelatedLocations == nil || len(entry.RelatedLocations) != 0 {
 			t.Fatalf("unexpected other error: %+v at %+v", entry, entry.Location)
 		}
@@ -524,6 +557,10 @@ func v048Run(t *testing.T, result *model.Result, source string, want []v048Expec
 	}
 	if len(result.Processing) != processingCount+1 || len(result.Diagnostics) < diagnosticCount || result.Processing[processingCount].ID != source || result.Processing[processingCount].Tool != "dsl-validator" {
 		t.Fatal("unexpected history changes")
+	}
+	v048OtherFindings(t, &expected, result.Diagnostics[diagnosticCount:], source)
+	if err := validator.CheckModel(result); err != nil {
+		t.Fatal(err)
 	}
 	previous := *result
 	previous.Processing, previous.Diagnostics = result.Processing[:processingCount], result.Diagnostics[:diagnosticCount]
@@ -540,4 +577,52 @@ func v048Snapshot(t *testing.T, result *model.Result) string {
 		t.Fatal(err)
 	}
 	return string(encoded)
+}
+
+// v048OtherFindings учитывает только разрешённые побочные изменения от других
+// диагностик полного каталога. Ожидания самой проверки заданы явно в Run.
+// Исходник, история, родители и связанные диапазоны не меняются.
+func v048OtherFindings(t *testing.T, expected *model.Result, entries []model.Diagnostic, source string) {
+	t.Helper()
+	order := make(map[string]int)
+	for i, entry := range append(append([]model.Diagnostic{}, expected.Diagnostics...), entries...) {
+		order[entry.ID] = i
+	}
+	for _, entry := range entries {
+		if entry.Source != source {
+			t.Fatalf("unexpected diagnostic source %q", entry.Source)
+		}
+		if entry.DiagnosticCode == "V048" || entry.DiagnosticCode == "V005" {
+			continue
+		}
+		if entry.SeverityLevel == "error" {
+			expected.Document.HasErrors = true
+			if entry.Location != nil {
+				expected.Lines[entry.Location.Start.Line-1].HasErrors = true
+			}
+		}
+		if entry.DiagnosticScope != "element" {
+			continue
+		}
+		if entry.Location == nil {
+			t.Fatal("element diagnostic has no location")
+		}
+		matched := false
+		for i := range expected.Lines[entry.Location.Start.Line-1].Elements {
+			element := &expected.Lines[entry.Location.Start.Line-1].Elements[i]
+			if element.Start == entry.Location.Start.Column && element.End == entry.Location.End.Column {
+				element.ErrorIDs = append(element.ErrorIDs, entry.ID)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Fatal("element diagnostic does not identify an element")
+		}
+	}
+	for i := range expected.Lines {
+		for j := range expected.Lines[i].Elements {
+			slices.SortStableFunc(expected.Lines[i].Elements[j].ErrorIDs, func(a, b string) int { return order[a] - order[b] })
+		}
+	}
 }
