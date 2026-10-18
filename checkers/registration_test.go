@@ -1,11 +1,34 @@
 package checkers
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 	dslversions "github.com/verdoga/dsl-validator/dsl-versions"
 )
+
+func TestRegistrationPreservesMergedDiagnostics(t *testing.T) {
+	// Объединение локального каталога и main: ни один код не должен исчезнуть.
+	// Новые регистрации разрешены, но все перечисленные должны быть доступны.
+	want := []diagnostics.Code{
+		"V001", "V002", "V003", "V004", "V005", "V006", "V007", "V008",
+		"V010", "V011", "V012", "V013", "V014", "V016", "V017", "V018", "V019",
+		"V021", "V022", "V023", "V024", "V026", "V027", "V028", "V029",
+		"V031", "V032", "V033", "V034", "V036", "V037", "V038", "V039",
+		"V041", "V042", "V043", "V044", "V046", "V047", "V048", "V049",
+	}
+	registry, err := diagnostics.NewRegistry(RegistrationCheckers())
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions := registrationDefinitions(t, registry, "1.2")
+	for _, code := range want {
+		if !slices.ContainsFunc(definitions, func(d diagnostics.Definition) bool { return d.Code == code }) {
+			t.Errorf("merged diagnostic %s is missing from DSL 1.2", code)
+		}
+	}
+}
 
 func TestRegistrationCheckers(t *testing.T) {
 	t.Run("nonempty catalog", func(t *testing.T) {
