@@ -65,5 +65,6 @@ func RegistrationCheckers() map[string]diagnostics.RegistrationFunc {
 		"V048": registrationV048,
 		"V049": registrationV049,
 		"V050": registrationV050,
+		"V055": registrationV055,
 	}
 }
