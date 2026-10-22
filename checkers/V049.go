@@ -61,8 +61,11 @@ func checkV049(lines diagnostics.Lines, findings diagnostics.Findings) error {
 					for index < len(text) && text[index] == '_' {
 						index++
 					}
-					if index-start == 5 && index < len(text) && text[index] == '{' {
-						index = v049AnswerEnd(text, index+1)
+					if index-start == 5 {
+						// Соседние {ANSWER} задают альтернативы одного пропуска.
+						for index < len(text) && text[index] == '{' {
+							index = v049AnswerEnd(text, index+1)
+						}
 					}
 					continue
 				}
