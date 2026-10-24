@@ -157,7 +157,11 @@ func mainSavedReport(t *testing.T, path string, previous *model.Result, version 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fmt.Sprintf("Зарегистрировано диагностик: %d\nОБРАБОТАН %q, сохранён: да, строк: 4, ошибок: 0, проблем: 0, рекомендаций: 0, время: %d мс\n", registry.Len(), path, *current.DurationMs) +
+	banner := "dsl-validator dev\n"
+	if version == "1.0.0" {
+		banner = "dsl-validator v1.0.0\n"
+	}
+	return banner + fmt.Sprintf("Зарегистрировано диагностик: %d\nОБРАБОТАН %q, сохранён: да, строк: 4, ошибок: 0, проблем: 0, рекомендаций: 0, время: %d мс\n", registry.Len(), path, *current.DurationMs) +
 		"ИТОГО: всего: 1, обработано: 1, сбоев: 0, сохранено: 1, ошибок: 0, проблем: 0, рекомендаций: 0\n"
 }
 

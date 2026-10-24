@@ -77,7 +77,8 @@ func v017CheckPart(raw []rune, formatting []bool, part v015TextPart, number int,
 			for end < i && positions[end] == positions[end-1]+1 {
 				end++
 			}
-			if _, err := findings.Add(number, positions[start]+1, number, positions[end-1]+2, ""); err != nil {
+			if _, err := findings.Add(number, positions[start]+1, number, positions[end-1]+2,
+				v017V018Detail(text, start, i+1)); err != nil {
 				return err
 			}
 			start = end
