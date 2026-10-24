@@ -203,7 +203,7 @@ func TestV017FormattingNeighbours(t *testing.T) {
 		{"Wait <em>. . .</em>", nil, nil},
 		{`Hello \<em>,</em>`, nil, []v017ErrorExpectation{{"V112", [3]int{4, 13, 18}}}},
 		{`Hello <em\>,</em>`, nil, []v017ErrorExpectation{{"V112", [3]int{4, 13, 18}}}},
-		{"Hello <foo>,</foo>", nil, nil},
+		{"Hello <foo>,</foo>", nil, []v017ErrorExpectation{{"V115", [3]int{4, 7, 12}}, {"V115", [3]int{4, 13, 19}}}},
 		{"Hello <em x=y>,</em>", nil, []v017ErrorExpectation{{"V114", [3]int{4, 11, 14}}}},
 		{"Hello <br>,", nil, []v017ErrorExpectation{{"V111", [3]int{4, 1, 12}}}},
 	} {
@@ -546,7 +546,7 @@ func v017Run(t *testing.T, result *model.Result, processingID string, want [][3]
 				t.Errorf("unexpected accompanying V037: %+v", entry)
 			}
 		}
-		if (entry.DiagnosticCode == "V111" || entry.DiagnosticCode == "V112" || entry.DiagnosticCode == "V114") && entry.Source == processingID {
+		if (entry.DiagnosticCode == "V111" || entry.DiagnosticCode == "V112" || entry.DiagnosticCode == "V114" || entry.DiagnosticCode == "V115") && entry.Source == processingID {
 			gotErrors = append(gotErrors, entry)
 		}
 		if entry.DiagnosticCode == "V017" && entry.Source == processingID {
@@ -575,12 +575,13 @@ func v017Run(t *testing.T, result *model.Result, processingID string, want [][3]
 		}
 	}
 	if len(gotErrors) != len(wantErrors) {
-		t.Fatalf("current V111/V112/V114 count = %d, want %d; diagnostics: %+v", len(gotErrors), len(wantErrors), gotErrors)
+		t.Fatalf("current V111/V112/V114/V115 count = %d, want %d; diagnostics: %+v", len(gotErrors), len(wantErrors), gotErrors)
 	}
 	messages := map[diagnostics.Code]string{
 		"V111": "Команда пустой строки отличается от отдельной записи <br>.\nконкретизация: другое содержимое строки",
 		"V112": "Тег выделения не имеет пары в своей строке.\nконкретизация: Открытие и закрытие выделения должны находиться в одной текстовой строке",
 		"V114": "В теге выделения записаны атрибуты.",
+		"V115": "Использован неподдерживаемый HTML-тег.",
 	}
 	wantLineErrors := append([]bool{}, oldLineErrors...)
 	for i, expected := range wantErrors {

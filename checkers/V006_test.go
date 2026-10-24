@@ -118,22 +118,24 @@ func TestV006MediaSources(t *testing.T) {
 	// DSL 3.1.6: исходные кавычки и экранирование сохраняются в Raw,
 	// а Value содержит путь без ограничивающих кавычек и со снятым экранированием.
 	for _, tc := range []struct {
-		name   string
-		source string
-		value  string
+		name                string
+		source              string
+		value               string
+		wantOtherErrorLines []int
 	}{
-		{"quoted source", `"a"`, "a"},
-		{"quoted source with spaces", `"a b"`, "a b"},
-		{"escaped quote", `"a\"b"`, `a"b`},
-		{"two backslashes", `"a\\"`, `a\`},
-		{"four backslashes", `"a\\\\"`, `a\\`},
-		{"three backslashes and closing quote", `"a\\\"b"`, `a\"b`},
-		{"unrecognized escape", `"a\q"`, `a\q`},
-		{"unquoted path", `a.wav`, `a.wav`},
-		{"numeric source", `0012`, `0012`},
+		{"quoted source", `"a"`, "a", nil},
+		{"quoted source with spaces", `"a b"`, "a b", nil},
+		{"escaped quote", `"a\"b"`, `a"b`, nil},
+		{"two backslashes", `"a\\"`, `a\`, nil},
+		{"four backslashes", `"a\\\\"`, `a\\`, nil},
+		{"three backslashes and closing quote", `"a\\\"b"`, `a\"b`, nil},
+		// Кавычки парные: V006 отсутствует, но V085 выставляет флаг строки 3.
+		{"unrecognized escape", `"a\q"`, `a\q`, []int{3}},
+		{"unquoted path", `a.wav`, `a.wav`, nil},
+		{"numeric source", `0012`, `0012`, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			v006Run(t, v006Document(t, v006Media(t, tc.source, tc.value)), "current", nil, 1)
+			v006Run(t, v006Document(t, v006Media(t, tc.source, tc.value)), "current", nil, 1, tc.wantOtherErrorLines...)
 		})
 	}
 }
@@ -507,8 +509,9 @@ func v006Media(t *testing.T, source, value string) model.Line {
 // v006Run запускает штатный конвейер; want содержит явные тройки
 // (строка, начало, исключающий конец). Отдельно проверяется сопутствующая V037.
 // wantV037 задаёт точное число сопутствующих ошибок отсутствующего ID;
+// wantOtherErrorLines явно задаёт строки с ошибками других диагностик.
 // флаг документа проверяется отдельно, строки и прежняя история сохраняются.
-func v006Run(t *testing.T, result *model.Result, processingID string, want [][3]int, wantV037 int) {
+func v006Run(t *testing.T, result *model.Result, processingID string, want [][3]int, wantV037 int, wantOtherErrorLines ...int) {
 	t.Helper()
 	before := v006Snapshot(t, result)
 	var original model.Result
@@ -572,7 +575,7 @@ func v006Run(t *testing.T, result *model.Result, processingID string, want [][3]
 			t.Errorf("occurrence %d has unexpected metadata: %+v", i, entry)
 		}
 	}
-	if result.Document.HasErrors != (original.Document.HasErrors || len(want) > 0 || wantV037 > 0) {
+	if result.Document.HasErrors != (original.Document.HasErrors || len(want) > 0 || wantV037 > 0 || len(wantOtherErrorLines) > 0) {
 		t.Error("unexpected document.hasErrors")
 	}
 	if len(result.Lines) != len(original.Lines) || len(result.Processing) != len(original.Processing)+1 ||
@@ -583,6 +586,9 @@ func v006Run(t *testing.T, result *model.Result, processingID string, want [][3]
 		wantError := original.Lines[i].HasErrors
 		for _, expected := range want {
 			wantError = wantError || expected[0] == line.Number
+		}
+		for _, number := range wantOtherErrorLines {
+			wantError = wantError || number == line.Number
 		}
 		if line.HasErrors != wantError {
 			t.Errorf("line %d hasErrors = %v, want %v", line.Number, line.HasErrors, wantError)
