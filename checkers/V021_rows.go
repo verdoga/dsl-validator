@@ -18,7 +18,8 @@ type v021Row struct {
 // v021IndependentRows отмечает только подтверждённые самостоятельные серии.
 // Индекс результата — физический номер строки, нулевой элемент не используется.
 // Границы контейнеров и конструкций разрывают серию; blank и отдельный <br>
-// в text прозрачны, как при поиске разорванного абзаца.
+// в text прозрачны, как при поиске разорванного абзаца. Исключение —
+// список после двоеточия в instr: он требует физических соседей.
 func v021IndependentRows(lines diagnostics.Lines) []bool {
 	independent := make([]bool, lines.Len()+1)
 	var rows []v021Row
@@ -49,8 +50,11 @@ func v021IndependentRows(lines diagnostics.Lines) []bool {
 }
 
 // v021MarkSeries требует как минимум две соседние записи одного вида.
-// Вводное двоеточие исключается только вместе с серией поясняемых пунктов.
+// В instr дополнительно распознаются непрерывные списки после двоеточия.
 func v021MarkSeries(rows []v021Row, tag string, independent []bool) {
+	if tag == "instr" {
+		v021MarkInstrRows(rows, independent)
+	}
 	previousKind := 0
 	for i, row := range rows {
 		kind := v021RowKind(row, tag)
@@ -117,7 +121,7 @@ func v021RowKind(row v021Row, tag string) int {
 
 // v021LabelPrefix подтверждает подпись перед настоящим пропуском multifill.
 // Двоеточие должно быть вне скобок и кавычек; слева допустима фраза с косой
-// чертой (например, I/we). Само двоеточие в прозе не является исключением.
+// чертой (например, I/we). Внутреннее двоеточие само по себе не делает строку списком.
 func v021LabelPrefix(text []rune) bool {
 	index := v021Separator(text, ':')
 	return index > 0 && v021Phrase(text[:index])
