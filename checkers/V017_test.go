@@ -2,6 +2,7 @@ package checkers
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -561,8 +562,8 @@ func v017Run(t *testing.T, result *model.Result, processingID string, want [][3]
 			t.Errorf("occurrence %d location = %+v, want %+v", i, entry.Location, location)
 		}
 		if entry.DiagnosticCode != "V017" || entry.Source != processingID || entry.SeverityLevel != "warning" ||
-			entry.Message != "Перед знаком препинания находится пробел." ||
-			entry.DiagnosticScope != "line" || entry.Fatal || entry.RelatedLocations == nil || len(entry.RelatedLocations) != 0 {
+			!strings.HasPrefix(entry.Message, "Перед знаком препинания находится пробел.\nконкретизация: Обратите внимание на знак препинания: «") || !strings.HasSuffix(entry.Message, "»") || entry.DiagnosticScope != "line" ||
+			entry.Fatal || entry.RelatedLocations == nil || len(entry.RelatedLocations) != 0 {
 			t.Errorf("occurrence %d has unexpected metadata: %+v", i, entry)
 		}
 	}

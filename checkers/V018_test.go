@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -69,7 +70,7 @@ func TestV018Text(t *testing.T) {
 		{"space after closing quote", "«Hi!» There", nil},
 		{"space after closing bracket", "(А.) Б", nil},
 		{"opening quote after punctuation", `Hi,"there"`, [][3]int{{3, 3, 4}}},
-		{"abbreviations are not recognized", "e.g.Next", [][3]int{{3, 2, 3}, {3, 4, 5}}},
+		{"abbreviation followed by text", "e.g.Next", [][3]int{{3, 4, 5}}},
 		{"URL punctuation", "https://x.y", nil},
 		{"email punctuation", "a@b.cd", nil},
 		{"slashes do not hide punctuation", "/a,b/", [][3]int{{3, 3, 4}}},
@@ -540,7 +541,7 @@ func v018Run(t *testing.T, result *model.Result, processingID string, want [][3]
 			t.Errorf("occurrence %d location = %+v, want %+v", i, entry.Location, location)
 		}
 		if entry.DiagnosticCode != "V018" || entry.Source != processingID || entry.SeverityLevel != "warning" ||
-			entry.Message != "После знака препинания отсутствует пробел." || entry.DiagnosticScope != "line" ||
+			!strings.HasPrefix(entry.Message, "После знака препинания отсутствует пробел.\nконкретизация: Обратите внимание на знак препинания: «") || !strings.HasSuffix(entry.Message, "»") || entry.DiagnosticScope != "line" ||
 			entry.Fatal || entry.RelatedLocations == nil || len(entry.RelatedLocations) != 0 {
 			t.Errorf("occurrence %d has unexpected metadata: %+v", i, entry)
 		}

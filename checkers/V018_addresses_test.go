@@ -16,7 +16,7 @@ func TestV018AddressBoundaries(t *testing.T) {
 		{"email after missing space", "Mail:user@example.org", [][3]int{{3, 5, 6}}},
 		{"email before missing space", "user@example.org Next,word", [][3]int{{3, 22, 23}}},
 		{"empty host is not address", "https://.org", [][3]int{{3, 6, 7}, {3, 9, 10}}},
-		{"abbreviation remains text", "e.g.Next", [][3]int{{3, 2, 3}, {3, 4, 5}}},
+		{"abbreviation is not address and needs final space", "e.g.Next", [][3]int{{3, 4, 5}}},
 		{"ordinary slash remains text", "/a,b/", [][3]int{{3, 3, 4}}},
 		{"unmatched double closing quote", "Ready.\" Next", nil},
 		{"opening double quote", "Ready,\"Next\"", [][3]int{{3, 6, 7}}},

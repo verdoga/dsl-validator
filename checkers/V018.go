@@ -22,7 +22,7 @@ func registrationV018(registry *diagnostics.Registry) error {
 // checkV018 проверяет пробел после группы ? . ! , : ; с закрывающими знаками.
 // Разрешённые HTML-маркеры прозрачны, а конец ответа завершает его текст.
 // Сообщение охватывает последний знак пунктуации группы в исходных
-// Unicode-колонках [column,column+1). Конкретизация отсутствует.
+// Unicode-колонках [column,column+1). Конкретизация показывает местный контекст.
 func checkV018(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
@@ -59,8 +59,8 @@ func checkV018(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			}
 			previous = element
 		}
-		for _, position := range text.missing {
-			if _, err := findings.Add(number, position+1, number, position+2, ""); err != nil {
+		for _, missing := range text.missing {
+			if _, err := findings.Add(number, missing.position+1, number, missing.position+2, missing.detail); err != nil {
 				return err
 			}
 		}
@@ -98,12 +98,18 @@ func v018AcrossPlaceholder(raw []rune, previous, current diagnostics.Element) bo
 
 // v018TextScan хранит состояние обхода строки с независимыми ответами.
 // raw содержит видимые символы, positions — их исходные индексы рун.
-// missing содержит индексы рун исходной строки.
+// missing содержит позиции исходной строки и конкретизации срабатываний.
 type v018TextScan struct {
 	raw       []rune
 	positions []int
 	quotes    [2]bool // Открытые прямые одинарная и двойная кавычки.
-	missing   []int
+	missing   []v018MissingSpace
+}
+
+// v018MissingSpace хранит индекс руны в исходной строке и видимый пример.
+type v018MissingSpace struct {
+	position int
+	detail   string
 }
 
 // scan проверяет [start,end) в исходных индексах рун с 0.
@@ -122,6 +128,10 @@ func (text *v018TextScan) scan(start, end int, hardEnd bool) {
 			i++
 			continue
 		}
+		if v018AbbreviationDot(text.raw[start:end], i-start) {
+			i++
+			continue
+		}
 		if (text.raw[i] == '.' || text.raw[i] == ',' || text.raw[i] == ':') &&
 			i > 0 && i+1 < len(text.raw) && unicode.IsDigit(text.raw[i-1]) && unicode.IsDigit(text.raw[i+1]) {
 			i++
@@ -133,7 +143,7 @@ func (text *v018TextScan) scan(start, end int, hardEnd bool) {
 			if addresses[i-start] {
 				break
 			}
-			if v018Punctuation(text.raw[i]) {
+			if v018Punctuation(text.raw[i]) || v018GroupEllipsis(text.raw[start:end], i-start) {
 				last = i
 				i++
 				continue
@@ -153,7 +163,10 @@ func (text *v018TextScan) scan(start, end int, hardEnd bool) {
 		if i == end && hardEnd || i == len(text.raw) || v018HorizontalSpace(text.raw[i]) {
 			continue
 		}
-		text.missing = append(text.missing, text.positions[last])
+		text.missing = append(text.missing, v018MissingSpace{
+			position: text.positions[last],
+			detail:   v017V018Detail(text.raw[start:end], last-start, last-start+1),
+		})
 	}
 }
 
@@ -185,7 +198,7 @@ func v018Quote(raw []rune, i int, quotes *[2]bool) bool {
 		index = 1
 	}
 	closed := quotes[index] || i > 0 &&
-		(v018Punctuation(raw[i-1]) || unicode.In(raw[i-1], unicode.Pe, unicode.Pf)) &&
+		(v018Punctuation(raw[i-1]) || v018GroupEllipsis(raw, i-1) || unicode.In(raw[i-1], unicode.Pe, unicode.Pf)) &&
 		(i+1 == len(raw) || v018HorizontalSpace(raw[i+1]) ||
 			unicode.In(raw[i+1], unicode.Pe, unicode.Pf) || v018Punctuation(raw[i+1]) || raw[i+1] == '\'' || raw[i+1] == '"')
 	quotes[index] = !closed
