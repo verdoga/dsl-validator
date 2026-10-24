@@ -2,6 +2,7 @@ package checkers
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -157,10 +158,16 @@ func v112ReadMarker(raw []rune, start int) (marker v112Marker, complete bool) {
 		index > nameStart && (raw[index] >= '0' && raw[index] <= '9' || raw[index] == '-' || raw[index] == ':')) {
 		index++
 	}
-	if index == nameStart || index < len(raw) && raw[index] != ' ' && raw[index] != '\t' && raw[index] != '/' && raw[index] != '>' {
+	// Экранированный знак сразу после имени не завершает имя HTML-маркера.
+	// Например, <em\> остаётся текстом и не скрывает следующий </em>.
+	if index == nameStart || index < len(raw) && v112Escape(raw, index) {
 		return marker, false
 	}
-	marker.name = strings.ToLower(string(raw[nameStart:index]))
+	if index == len(raw) || unicode.Is(unicode.White_Space, raw[index]) || raw[index] == '/' || raw[index] == '>' {
+		marker.name = strings.ToLower(string(raw[nameStart:index]))
+	}
+	// Даже при неподдерживаемом продолжении имени читаем маркер целиком:
+	// его атрибуты не должны становиться самостоятельными выделениями.
 	var quote rune
 	for ; index < len(raw); index++ {
 		if v112Escape(raw, index) {

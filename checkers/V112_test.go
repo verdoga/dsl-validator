@@ -463,3 +463,26 @@ func TestV112EndingsAndHistory(t *testing.T) {
 		v112TestRun(t, v112TestDocument(t, v112TestOpen(t, "text", 2, 1), v112TestText(t, "<em>", "<em>", 3, 2)), "current", [][3]int{{4, 1, 5}})
 	})
 }
+
+func TestV112WholeUnknownMarkers(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		want      [][3]int
+	}{
+		{"underscore name", "<span_name title='<em>'>TEXT</span>", nil},
+		{"unicode space", "<span\u00a0title='<em>'>TEXT</span>", nil},
+		{"different unicode space", "<span\u2003title='<u>'>TEXT</span>", nil},
+		{"supported name prefix", "<em_name title='<u>'>TEXT</em_name>", nil},
+		{"quoted greater sign", "<span_name title='><em>'>TEXT</span_name>", nil},
+		{"double quoted marker", `<span_name title="> <em>">TEXT</span_name>`, nil},
+		{"unfinished attribute", "<span_name title='<em>", nil},
+		{"real following marker", "<s_n a='<em>'><u>", [][3]int{{4, 15, 18}}},
+		{"real preceding marker", "<u><s_n a='</u>'>", [][3]int{{4, 1, 4}}},
+		{"known name unicode boundary", "<em\u00a0title='<u>'>TEXT</em>", nil},
+		{"unpaired known name unicode boundary", "<em\u00a0x>", [][3]int{{4, 1, 7}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v112TestRun(t, v112TestBlock(t, tc.raw), "current", tc.want)
+		})
+	}
+}
