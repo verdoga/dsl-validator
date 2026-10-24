@@ -2,7 +2,6 @@ package checkers
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 
 	"github.com/verdoga/dsl-validator/model"
@@ -40,10 +39,64 @@ func TestV021ExplicitListMarkers(t *testing.T) {
 }
 
 func TestV021CorpusIndependentRows(t *testing.T) {
-	data, err := os.ReadFile("testdata/V021_rows.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := []byte(`[
+  {
+    "name": "A:65-67",
+    "tag": "multifill",
+    "rows": [
+      "I/we: I _____{'m} Camila. (= I am)",
+      "I/we: We _____{'re} from Spain. (= we are)",
+      "you: _____{are} you from the UK?"
+    ]
+  },
+  {
+    "name": "A:434-435",
+    "tag": "note",
+    "rows": [
+      "the USA = the United States of America",
+      "the UK = the United Kingdom"
+    ]
+  },
+  {
+    "name": "C:74-77",
+    "tag": "key",
+    "rows": [
+      "hello (2)",
+      "good afternoon (4)",
+      "good morning (3)",
+      "good evening (3)"
+    ]
+  },
+  {
+    "name": "C:310-320",
+    "tag": "note",
+    "rows": [
+      "Capital letters",
+      "We use capital letters (A, B, C, D ...):",
+      "for names (Sophia Taylor, Ben Wilson, Maria González)",
+      "for names of places (Toronto, Canada, High Street)",
+      "for nationalities (Italian, British, Chinese)",
+      "at the beginning of a sentence (My name's ...)",
+      "",
+      "Full stops",
+      ". = full stop",
+      "We usually use full stops at the end of sentences.",
+      "My name's Sophia Taylor."
+    ]
+  },
+  {
+    "name": "Review:143-147",
+    "tag": "multifill",
+    "rows": [
+      "she is: _____{she's}",
+      "we are: _____{we're}",
+      "he is: _____{he's}",
+      "I am not: _____{I'm} not",
+      "he is not: he _____{isn't}"
+    ]
+  }
+]
+`)
 	var cases []struct {
 		Name, Tag string
 		Rows      []string
