@@ -70,7 +70,7 @@ func TestV021PairConditions(t *testing.T) {
 		{"exclamation", "Готово!", "далее", nil},
 		{"ellipsis", "Готово…", "далее", nil},
 		{"three dots", "Готово...", "далее", nil},
-		{"colon is not terminal", "Начало:", "далее", [][4]int{{4, 1, 5, 6}}},
+		{"colon terminates line", "Начало:", "далее", nil},
 		{"semicolon is not terminal", "Начало;", "далее", [][4]int{{4, 1, 5, 6}}},
 		{"hyphen", "Начало-", "далее", nil},
 		{"en dash", "Начало –", "далее", nil},

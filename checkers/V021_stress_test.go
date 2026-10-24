@@ -24,7 +24,8 @@ func TestV021PairedStressLists(t *testing.T) {
 		{"not separated by another construction", []string{"hello", "good morning"}, []string{"hel'lo", "good 'morning"},
 			[]model.Line{v021Text(t, "Another exercise.", 2, 1)}, [][4]int{{4, 1, 5, 13}, {9, 1, 10, 14}}},
 		{"different row count", []string{"hello", "good morning"}, []string{"hel'lo"}, nil, [][4]int{{4, 1, 5, 13}}},
-		{"punctuated prose is not a word list", []string{"Начало:", "далее"}, []string{"На'чало:", "да'лее"}, nil, [][4]int{{4, 1, 5, 6}, {8, 1, 9, 7}}},
+		{"colon terminates prose", []string{"Начало:", "далее"}, []string{"На'чало:", "да'лее"}, nil, nil},
+		{"punctuated prose is not a word list", []string{"Начало;", "далее"}, []string{"На'чало;", "да'лее"}, nil, [][4]int{{4, 1, 5, 6}, {8, 1, 9, 7}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := v021StressDocument(t, tc.words, tc.key, tc.between...)

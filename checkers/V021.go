@@ -22,7 +22,8 @@ func registrationV021(registry *diagnostics.Registry) error {
 
 // checkV021 рассматривает соседние строки непосредственного содержимого.
 // Границы контейнеров и любые конструкции, кроме blank и отдельного <br>
-// в text, прерывают соседство. Подтверждённые учебные серии также разрывают его.
+// в text, прерывают соседство. Конечное двоеточие завершает строку;
+// подтверждённые учебные серии также разрывают соседство.
 // Диапазон включает полные Raw обеих строк
 // и промежуток между ними; правая Unicode-колонка исключается.
 func checkV021(lines diagnostics.Lines, findings diagnostics.Findings) error {
@@ -62,7 +63,7 @@ func checkV021(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			}
 		}
 		previous = 0
-		if v021Unfinished(visible) {
+		if v021Unfinished(visible) && !v021EndsColon(visible) {
 			previous = number
 		}
 	}
