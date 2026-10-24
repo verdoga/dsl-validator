@@ -203,14 +203,14 @@ func TestRunTreatsOutputFailuresAsTechnicalFailures(t *testing.T) {
 	}
 }
 
-// runReportStart задаёт ожидаемый счётчик штатного каталога без запуска Check.
+// runReportStart задаёт стартовый вывод dev-сборки без запуска Check.
 func runReportStart(t *testing.T) string {
 	t.Helper()
 	registry, err := diagnostics.NewRegistry(checkers.RegistrationCheckers())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fmt.Sprintf("Зарегистрировано диагностик: %d\n", registry.Len())
+	return fmt.Sprintf("dsl-validator dev\nЗарегистрировано диагностик: %d\n", registry.Len())
 }
 
 // runValidJSON — полный документ с обычным текстом и историей разбора.

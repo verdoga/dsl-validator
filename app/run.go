@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/verdoga/dsl-validator/checkers"
 	"github.com/verdoga/dsl-validator/console"
@@ -24,7 +25,7 @@ const (
 	exitFailure = 1
 	// exitUsage — неверные аргументы либо непригодный исходный путь.
 	exitUsage = 2
-	// toolName — стабильное имя валидатора в Processing.Tool.
+	// toolName — стабильное имя валидатора в консоли и Processing.Tool.
 	toolName = "dsl-validator"
 )
 
@@ -33,7 +34,8 @@ const (
 // При ошибке аргументов возвращает 2, при справке — 0; повторно их не печатает.
 // При ошибке обхода или реестра выводит причину в stderr и возвращает 1
 // до открытия JSON; найденные при неудачном обходе пути не обрабатываются.
-// После создания реестра создаёт reporter.New с os.Stdout и os.Stderr,
+// После создания реестра выводит имя и версию инструмента в stdout,
+// затем создаёт reporter.New с os.Stdout и os.Stderr,
 // вызывает Start и последовательно processFile для каждого пути.
 // Пригодность выборки диагностик для каждого документа проверяет Prepare
 // внутри processFile до добавления Processing и сохранения JSON.
@@ -70,6 +72,14 @@ func Run(args []string, version string) int {
 	}
 	registry, err := diagnostics.NewRegistry(checkers.RegistrationCheckers())
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Ошибка: %v\n", err)
+		return exitFailure
+	}
+	displayVersion := version
+	if version != "dev" && !strings.HasPrefix(version, "v") {
+		displayVersion = "v" + version
+	}
+	if _, err := fmt.Fprintf(os.Stdout, "%s %s\n", toolName, displayVersion); err != nil {
 		fmt.Fprintf(os.Stderr, "Ошибка: %v\n", err)
 		return exitFailure
 	}
