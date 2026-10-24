@@ -7,7 +7,8 @@ import (
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
 
-// registrationV107 регистрирует обязательное открытие пяти блоков для DSL 1.2.
+// registrationV107 регистрирует обязательное открытие четырёх блоков для DSL 1.2.
+// Открытие table проверяет специализированная диагностика V094.
 func registrationV107(registry *diagnostics.Registry) error {
 	return registry.Register(diagnostics.Definition{
 		Code:     "V107",
@@ -73,9 +74,9 @@ func v107Declaration(line diagnostics.Line, raw []rune) (string, int, int) {
 	return name, start + 1, end + 1
 }
 
-// v107BlockName сопоставляет имя без учёта регистра только пяти блочным тегам.
+// v107BlockName сопоставляет имя без учёта регистра четырём блочным тегам.
 func v107BlockName(value string) string {
-	for _, name := range []string{"table", "script", "text", "key", "fragment"} {
+	for _, name := range []string{"script", "text", "key", "fragment"} {
 		if strings.EqualFold(value, name) {
 			return name
 		}

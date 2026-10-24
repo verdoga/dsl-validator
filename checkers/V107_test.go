@@ -30,10 +30,10 @@ func TestV107RegistrationAndVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	count := 0
+	count, tables := 0, 0
 	for _, definition := range definitions {
 		if definition.Code == "V094" {
-			t.Fatal("V094 must not run alongside V107")
+			tables++
 		}
 		if definition.Code != "V107" {
 			continue
@@ -47,6 +47,9 @@ func TestV107RegistrationAndVersions(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("V107 definitions = %d, want 1", count)
+	}
+	if tables != 1 {
+		t.Fatalf("V094 definitions = %d, want 1 alongside V107", tables)
 	}
 	for _, version := range []string{"", "1.1", "1.2.0", "1.3"} {
 		t.Run(version, func(t *testing.T) {
@@ -310,7 +313,6 @@ func TestV107AllTagsAndForms(t *testing.T) {
 		name, argument, detail string
 		end                    int
 	}{
-		{"table", "Forms", "Тег @table требует открытия { в строке объявления; закрывающая } должна находиться на отдельной строке после содержимого.", 7},
 		{"script", "Conversation", "Тег @script требует открытия { в строке объявления; закрывающая } должна находиться на отдельной строке после содержимого.", 8},
 		{"text", "Reading", v107TestTextDetail, 6},
 		{"key", "Answers", "Тег @key требует открытия { в строке объявления; закрывающая } должна находиться на отдельной строке после содержимого.", 5},
@@ -386,6 +388,54 @@ func TestV107NameBoundaries(t *testing.T) {
 		t.Run("inline "+name, func(t *testing.T) {
 			v107TestRun(t, v107TestDocument(t, v107TestTag(t, name, "Read.", "content", 3)), "current", nil)
 		})
+	}
+}
+
+func TestV107LeavesTablesToV094(t *testing.T) {
+	for _, name := range []string{"table", "TaBlE"} {
+		for _, representation := range []string{"tag", "invalid with tag", "unparsed"} {
+			for _, nested := range []bool{false, true} {
+				t.Run(name+"/"+representation+"/nested="+strconv.FormatBool(nested), func(t *testing.T) {
+					parent, number := 3, 4
+					var body []model.Line
+					if nested {
+						body = append(body, v107TestOpen(t, "fragment", "intro", "identifier", 3))
+						parent, number = 4, 5
+					}
+					raw := "@" + name + " Forms"
+					line := v107TestInvalid(t, raw, parent)
+					switch representation {
+					case "tag":
+						line = v107TestTag(t, name, "Forms", "title", parent)
+					case "invalid with tag":
+						line = v107TestMissing(t, raw, "table", 1, 7, parent)
+					}
+					body = append(body, line, v107TestMissing(t, "@text Reading", "text", 1, 6, parent))
+					if nested {
+						body = append(body, v107TestClose(t, parent))
+					}
+					result := v107TestDocument(t, body...)
+					if representation == "tag" {
+						v107TestParserError(t, result, number, 0, "Отсутствует открытие обязательного блока.")
+					}
+					// Обе проверки выполняются штатным каталогом: V107 относится
+					// только к text, а отсутствие открытия table отмечается V094.
+					v107TestRun(t, result, "current", []v107TestWant{{number + 1, 1, 6, v107TestTextDetail}})
+					var tables []model.Diagnostic
+					for _, entry := range result.Diagnostics {
+						if entry.Source == "current" && entry.DiagnosticCode == "V094" {
+							tables = append(tables, entry)
+						}
+					}
+					location := model.Location{Start: model.Position{Line: number, Column: 1}, End: model.Position{Line: number, Column: 7}}
+					if len(tables) != 1 || tables[0].Location == nil || *tables[0].Location != location ||
+						tables[0].Message != "У @table отсутствует открывающая скобка блочной формы." ||
+						tables[0].SeverityLevel != "error" || tables[0].DiagnosticScope != "line" || len(tables[0].RelatedLocations) != 0 {
+						t.Fatalf("expected one specific V094 on table: %+v", tables)
+					}
+				})
+			}
+		}
 	}
 }
 
@@ -549,7 +599,7 @@ func TestV107CoexistsWithBraceBalance(t *testing.T) {
 					continue
 				}
 				if entry.DiagnosticCode == "V094" {
-					t.Fatal("replaced V094 was executed")
+					t.Fatal("V094 must not diagnose @text")
 				}
 				if entry.DiagnosticCode == "V005" {
 					balance = append(balance, entry)
