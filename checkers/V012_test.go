@@ -83,9 +83,9 @@ func TestV012SignsBetweenDigits(t *testing.T) {
 
 func TestV012FormattingNeighbours(t *testing.T) {
 	for _, tc := range []struct {
-		raw      string
-		want     [][3]int
-		wantV112 [][3]int
+		raw        string
+		want       [][3]int
+		wantErrors []v012ErrorExpectation
 	}{
 		{"1-<em>12</em>", [][3]int{{4, 2, 3}}, nil},
 		{"<em>1</em>-12", [][3]int{{4, 11, 12}}, nil},
@@ -94,14 +94,14 @@ func TestV012FormattingNeighbours(t *testing.T) {
 		{"1–<em>12</em>", nil, nil},
 		{"a-<em>b</em>", nil, nil},
 		{"1-<em>-2</em>", nil, nil},
-		{`1-\<em>12</em>`, nil, [][3]int{{4, 10, 15}}},
-		{`1-<em\>12</em>`, nil, [][3]int{{4, 10, 15}}},
+		{`1-\<em>12</em>`, nil, []v012ErrorExpectation{{"V112", [3]int{4, 10, 15}}}},
+		{`1-<em\>12</em>`, nil, []v012ErrorExpectation{{"V112", [3]int{4, 10, 15}}}},
 		{"1-<foo>12</foo>", nil, nil},
-		{"1-<em x=y>12</em>", nil, nil},
-		{"1-<br>12", nil, nil},
+		{"1-<em x=y>12</em>", nil, []v012ErrorExpectation{{"V114", [3]int{4, 7, 10}}}},
+		{"1-<br>12", nil, []v012ErrorExpectation{{"V111", [3]int{4, 1, 9}}}},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
-			v012Run(t, v020TextBlock(t, tc.raw), "current", tc.want, 1, tc.wantV112...)
+			v012Run(t, v020TextBlock(t, tc.raw), "current", tc.want, 1, tc.wantErrors...)
 		})
 	}
 	v012Run(t, v020TextBlock(t, "1-", "<em>12</em>"), "current", nil, 1)
@@ -406,12 +406,19 @@ func v012Text(t *testing.T, raw, value string, parent, depth int) model.Line {
 	return v012Line(t, raw, "content", parent, depth, v012Element(t, "content", raw, value, 1))
 }
 
+// v012ErrorExpectation задаёт код сопутствующей ошибки и её диапазон.
+// location содержит номер строки, начало и исключающий конец в столбцах.
+type v012ErrorExpectation struct {
+	code     diagnostics.Code
+	location [3]int
+}
+
 // v012Run запускает штатный конвейер и проверяет V012 текущего запуска.
 // want содержит явные тройки: строка, начало, исключающий конец диапазона.
-// wantV037 и wantV112 задают точные ожидания сопутствующих ошибок.
+// wantV037 и wantErrors задают точные ожидания сопутствующих ошибок.
 // Флаги документа и строк проверяются с учётом этих ожиданий; исходные
 // данные, ссылки элементов и прежняя история должны сохраняться.
-func v012Run(t *testing.T, result *model.Result, processingID string, want [][3]int, wantV037 int, wantV112 ...[3]int) {
+func v012Run(t *testing.T, result *model.Result, processingID string, want [][3]int, wantV037 int, wantErrors ...v012ErrorExpectation) {
 	t.Helper()
 	before := v012Snapshot(t, result)
 	oldDocumentError := result.Document.HasErrors
@@ -431,7 +438,7 @@ func v012Run(t *testing.T, result *model.Result, processingID string, want [][3]
 	if err := validator.Run(result, checks, processingID); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	var got, gotV112 []model.Diagnostic
+	var got, gotErrors []model.Diagnostic
 	gotV037 := 0
 	seenIDs := make(map[string]bool)
 	for i, entry := range result.Diagnostics {
@@ -450,8 +457,8 @@ func v012Run(t *testing.T, result *model.Result, processingID string, want [][3]
 				t.Errorf("unexpected accompanying V037: %+v", entry)
 			}
 		}
-		if entry.DiagnosticCode == "V112" && entry.Source == processingID {
-			gotV112 = append(gotV112, entry)
+		if (entry.DiagnosticCode == "V111" || entry.DiagnosticCode == "V112" || entry.DiagnosticCode == "V114") && entry.Source == processingID {
+			gotErrors = append(gotErrors, entry)
 		}
 		if entry.DiagnosticCode == "V012" && entry.Source == processingID {
 			got = append(got, entry)
@@ -478,20 +485,25 @@ func v012Run(t *testing.T, result *model.Result, processingID string, want [][3]
 			t.Errorf("occurrence %d has unexpected metadata: %+v", i, entry)
 		}
 	}
-	if len(gotV112) != len(wantV112) {
-		t.Fatalf("current V112 count = %d, want %d; diagnostics: %+v", len(gotV112), len(wantV112), gotV112)
+	if len(gotErrors) != len(wantErrors) {
+		t.Fatalf("current V111/V112/V114 count = %d, want %d; diagnostics: %+v", len(gotErrors), len(wantErrors), gotErrors)
+	}
+	messages := map[diagnostics.Code]string{
+		"V111": "Команда пустой строки отличается от отдельной записи <br>.\nконкретизация: другое содержимое строки",
+		"V112": "Тег выделения не имеет пары в своей строке.\nконкретизация: Открытие и закрытие выделения должны находиться в одной текстовой строке",
+		"V114": "В теге выделения записаны атрибуты.",
 	}
 	wantLineErrors := append([]bool{}, oldLineErrors...)
-	for i, expected := range wantV112 {
-		entry := gotV112[i]
-		location := model.Location{Start: model.Position{Line: expected[0], Column: expected[1]},
-			End: model.Position{Line: expected[0], Column: expected[2]}}
-		if entry.Location == nil || *entry.Location != location || entry.SeverityLevel != "error" ||
+	for i, expected := range wantErrors {
+		entry := gotErrors[i]
+		location := model.Location{Start: model.Position{Line: expected.location[0], Column: expected.location[1]},
+			End: model.Position{Line: expected.location[0], Column: expected.location[2]}}
+		if entry.DiagnosticCode != expected.code || entry.Location == nil || *entry.Location != location || entry.SeverityLevel != "error" ||
 			entry.DiagnosticScope != "line" || entry.Fatal || entry.RelatedLocations == nil || len(entry.RelatedLocations) != 0 ||
-			entry.Message != "Тег выделения не имеет пары в своей строке.\nконкретизация: Открытие и закрытие выделения должны находиться в одной текстовой строке" {
-			t.Errorf("unexpected accompanying V112: %+v; want location %+v", entry, location)
+			entry.Message != messages[expected.code] {
+			t.Errorf("unexpected accompanying diagnostic: %+v; want %s at %+v", entry, expected.code, location)
 		}
-		wantLineErrors[expected[0]-1] = true
+		wantLineErrors[expected.location[0]-1] = true
 	}
 	if len(result.Lines) != len(wantLineErrors) {
 		t.Fatal("line count changed")
@@ -504,8 +516,8 @@ func v012Run(t *testing.T, result *model.Result, processingID string, want [][3]
 	if len(result.Processing) != processingCount+1 || len(result.Diagnostics) < diagnosticCount {
 		t.Fatal("unexpected processing count or lost diagnostic history")
 	}
-	if result.Document.HasErrors != (oldDocumentError || wantV037 > 0 || len(wantV112) > 0) {
-		t.Errorf("document.hasErrors = %v, want %v", result.Document.HasErrors, oldDocumentError || wantV037 > 0 || len(wantV112) > 0)
+	if result.Document.HasErrors != (oldDocumentError || wantV037 > 0 || len(wantErrors) > 0) {
+		t.Errorf("document.hasErrors = %v, want %v", result.Document.HasErrors, oldDocumentError || wantV037 > 0 || len(wantErrors) > 0)
 	}
 	previous := *result
 	previous.Lines = append([]model.Line{}, result.Lines...)

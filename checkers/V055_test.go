@@ -49,7 +49,7 @@ func TestV055Registration(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("V055 definitions = %d, want 1", count)
 	}
-	for _, version := range []string{"", "1.1", "1.3", "2.1.3"} {
+	for _, version := range []string{"", "1.1", "1.2.0", "1.3", "2.1.3"} {
 		t.Run("unsupported "+version, func(t *testing.T) {
 			result := v055TestDocument(t, "")
 			result.Document.DSLVersion = &version
@@ -417,6 +417,126 @@ func TestV055UnknownVersionStopsBeforeChecks(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestV055OtherPrecedingConstructions(t *testing.T) {
+	t.Run("header is an obstacle", func(t *testing.T) {
+		result := v055TestDocument(t, "Lesson", v055TestVersion(t),
+			v055TestTag(t, "header", "Vocabulary", "title"), v055TestHeading(t, "Lesson"),
+			v055TestText(t, "Read.", "Read.", 3, 1))
+		v055TestRun(t, result, "current", []v055TestWant{
+			{[3]int{3, 1, 2}, v055TestPrior, [][3]int{{2, 1, 19}}},
+		})
+	})
+	t.Run("include is an obstacle despite forward definition", func(t *testing.T) {
+		// DSL 3.12.9 разрешает ссылку до определения. Само определение
+		// помещено после заголовка, чтобы единственным препятствием был include.
+		fragment := v055TestFragment(t)
+		parent := 3
+		fragment.ParentLine, fragment.NestingLevel = &parent, 1
+		result := v055TestDocument(t, "Lesson", v055TestVersion(t),
+			v055TestTag(t, "include", "f", "identifier"), v055TestHeading(t, "Lesson"),
+			fragment, v055TestText(t, "Read.", "Read.", 4, 2), v055TestClose(t, 4, 2))
+		v055TestRun(t, result, "current", []v055TestWant{
+			{[3]int{3, 1, 2}, v055TestPrior, [][3]int{{2, 1, 11}}},
+		})
+	})
+	t.Run("newpage is an obstacle", func(t *testing.T) {
+		// Шаг newpage имеет отображаемое содержимое по DSL 2.7.6.
+		result := v055TestDocument(t, "Lesson", v055TestVersion(t),
+			v055TestLine(t, "@newpage", "tag", 0, 0,
+				v055TestElement(t, "tag", "@newpage", "newpage", 1, 9)),
+			v055TestText(t, "Read.", "Read.", 2, 1), v055TestHeading(t, "Lesson"))
+		v055TestRun(t, result, "current", []v055TestWant{
+			{[3]int{4, 1, 2}, v055TestPrior, [][3]int{{2, 1, 9}}},
+		})
+	})
+	t.Run("invalid construction before heading", func(t *testing.T) {
+		result := v055TestDocument(t, "Lesson", v055TestVersion(t),
+			v055TestInvalid(t, "@unknown X", 0, 0), v055TestHeading(t, "Lesson"))
+		v055TestRun(t, result, "current", []v055TestWant{
+			{[3]int{3, 1, 2}, v055TestPrior, [][3]int{{2, 1, 11}}},
+		})
+	})
+	t.Run("recognized metadata with malformed argument remains allowed", func(t *testing.T) {
+		// Нечисловой order — самостоятельная ошибка; V055 проверяет место
+		// заголовка и не переопределяет список разрешённых метатегов.
+		unparsed := v055TestElement(t, "unparsed", "nope", "", 8, 12)
+		unparsed.Value = nil
+		result := v055TestDocument(t, "Lesson", v055TestVersion(t),
+			v055TestLine(t, "@order nope", "tag", 0, 0,
+				v055TestElement(t, "tag", "@order", "order", 1, 7), unparsed),
+			v055TestHeading(t, "Lesson"))
+		v055TestRun(t, result, "current", nil)
+	})
+}
+
+func TestV055PartiallyParsedFirstCandidate(t *testing.T) {
+	for _, misplaced := range []bool{false, true} {
+		t.Run("misplaced="+strconv.FormatBool(misplaced), func(t *testing.T) {
+			// Парсер сохранил маркер, а название после отсутствующего
+			// разделителя осталось unparsed. Повторный заголовок не проверяется.
+			unparsed := v055TestElement(t, "unparsed", "Lesson", "", 2, 8)
+			unparsed.Value = nil
+			candidate := v055TestLine(t, "#Lesson", "invalid", 0, 0,
+				v055TestElement(t, "heading-level", "#", "1", 1, 2), unparsed)
+			lines := []model.Line{v055TestVersion(t)}
+			var want []v055TestWant
+			if misplaced {
+				lines = append(lines, v055TestText(t, "First.", "First.", 0, 0))
+				want = []v055TestWant{{[3]int{3, 1, 2}, v055TestPrior, [][3]int{{2, 1, 7}}}}
+			}
+			lines = append(lines, candidate, v055TestHeading(t, "Again"))
+			v055TestRun(t, v055TestDocument(t, "Again", lines...), "current", want)
+		})
+	}
+}
+
+func TestV055BlockAncestorThroughLogicalParents(t *testing.T) {
+	// DSL 4.9: полный блок с двумя непустыми ветвями. Родителями кандидата
+	// являются task и variant, а фигурный предок variants находится выше.
+	result := v055TestDocument(t, "", v055TestVersion(t), v055TestOpen(t, "variants", 0, 0),
+		v055TestLine(t, "@variant A", "tag", 2, 1,
+			v055TestElement(t, "tag", "@variant", "variant", 1, 9),
+			v055TestElement(t, "name", "A", "A", 10, 11)),
+		v055TestLine(t, "@task a", "tag", 3, 2,
+			v055TestElement(t, "tag", "@task", "task", 1, 6),
+			v055TestElement(t, "identifier", "a", "a", 7, 8)),
+		v055TestInvalid(t, " \t# Lesson", 4, 3),
+		v055TestText(t, "Read.", "Read.", 4, 3),
+		v055TestLine(t, "@variant B", "tag", 2, 1,
+			v055TestElement(t, "tag", "@variant", "variant", 1, 9),
+			v055TestElement(t, "name", "B", "B", 10, 11)),
+		v055TestText(t, "Write.", "Write.", 7, 2), v055TestClose(t, 2, 1))
+	v055TestRun(t, result, "current", []v055TestWant{
+		{[3]int{5, 3, 4}, v055TestBlock, [][3]int{{2, 1, 12}}},
+	})
+}
+
+func TestV055OnlyLiteralCandidatesAndLateVersion(t *testing.T) {
+	t.Run("editor candidates are all ignored", func(t *testing.T) {
+		result := v055TestDocument(t, "", v055TestVersion(t), v055TestOpen(t, "editor", 0, 0),
+			v055TestText(t, "# Literal", "# Literal", 2, 1),
+			v055TestText(t, "#MissingSeparator", "#MissingSeparator", 2, 1),
+			v055TestClose(t, 2, 1))
+		v055TestRun(t, result, "current", nil)
+	})
+	t.Run("uppercase literal block and indented heading before version", func(t *testing.T) {
+		result := v055TestDocument(t, "Lesson",
+			v055TestLine(t, "@EDITOR {", "block-start", 0, 0,
+				v055TestElement(t, "tag", "@EDITOR", "editor", 1, 8),
+				v055TestElement(t, "block-open", "{", "{", 9, 10)),
+			v055TestText(t, "# Literal", "# Literal", 1, 1), v055TestClose(t, 1, 1),
+			v055TestLine(t, " \t# Lesson", "heading", 0, 0,
+				v055TestElement(t, "heading-level", "#", "1", 3, 4),
+				v055TestElement(t, "title", "Lesson", "Lesson", 5, 11)),
+			v055TestLine(t, "@DSL-VERSION 1.2", "tag", 0, 0,
+				v055TestElement(t, "tag", "@DSL-VERSION", "dsl-version", 1, 13),
+				v055TestElement(t, "version", "1.2", "1.2", 14, 17)))
+		v055TestRun(t, result, "current", []v055TestWant{
+			{[3]int{4, 3, 4}, v055TestLate, nil},
+		})
+	})
 }
 
 // v055TestRegistry использует полный штатный каталог без подмены регистраций.
