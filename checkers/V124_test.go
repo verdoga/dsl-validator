@@ -1011,3 +1011,158 @@ func TestV124FragmentNearestParentAndRecovery(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { v124TestRun(t, v124TestDocument(t, tc.body...), "current", tc.want) })
 	}
 }
+
+func TestV124NewpageUsesPhysicalContainer(t *testing.T) {
+	result := v124TestDocument(t,
+		v124TestOpen(t, "variants", 2, 1),
+		v124TestTag(t, "variant", "name", "A", 3, 2),
+		v124TestLine(t, " \t@NoTe {", "block-start", 4, 3,
+			v124TestElement(t, "tag", "@NoTe", "note", 3, 8),
+			v124TestElement(t, "block-open", "{", "{", 9, 10)),
+		// Переход страницы меняет логического родителя, но не закрывает note.
+		v124TestLine(t, " \t@NeWpAgE", "tag", 2, 1,
+			v124TestElement(t, "tag", "@NeWpAgE", "newpage", 3, 11)),
+		v124TestClose(t, 5, 4),
+		v124TestTag(t, "newpage", "", "", 6, 2),
+		v124TestTag(t, "variant", "name", "B", 3, 2),
+		v124TestText(t, "Write.", "Write.", 9, 3),
+		v124TestClose(t, 3, 2),
+		v124TestTag(t, "newpage", "", "", 2, 1))
+	v124TestRun(t, result, "current", []v124Expected{
+		{[8]int{6, 3, 6, 11, 5, 3, 5, 8}, "Тег @newpage запрещён внутри блока @note."},
+	})
+	// За пределами note, но до закрытия variants владельцем остаётся V196.
+	var count int
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Source != "current" || diagnostic.DiagnosticCode != "V196" {
+			continue
+		}
+		count++
+		location := model.Location{Start: model.Position{Line: 8, Column: 1}, End: model.Position{Line: 8, Column: 9}}
+		related := model.Location{Start: model.Position{Line: 3, Column: 1}, End: model.Position{Line: 3, Column: 10}}
+		if diagnostic.Location == nil || *diagnostic.Location != location ||
+			len(diagnostic.RelatedLocations) != 1 || diagnostic.RelatedLocations[0] != related {
+			t.Fatalf("V196 must own only the newpage directly in variants: %+v", diagnostic)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("V196 count = %d, want 1", count)
+	}
+}
+
+func TestV124NewpageRecoversPhysicalParent(t *testing.T) {
+	v124TestRun(t, v124TestDocument(t,
+		v124TestLine(t, " \t@NoTe{", "block-start", 2, 1,
+			v124TestUnparsed(t, "@NoTe", 3, 8), v124TestElement(t, "block-open", "{", "{", 8, 9)),
+		v124TestInvalid(t, " \t@NeWpAgE Текст😀", 2, 1),
+		v124TestClose(t, 3, 2)), "current", []v124Expected{
+		{[8]int{4, 3, 4, 11, 3, 3, 3, 8}, "Тег @newpage запрещён внутри блока @note."},
+	})
+}
+
+func TestV124NewpagePartiallyKnownPhysicalBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		body      []model.Line
+		errorLine int
+		want      []v124Expected
+	}{
+		{"unclosed note", []model.Line{
+			v124TestOpen(t, "note", 2, 1), v124TestTag(t, "newpage", "", "", 3, 2),
+		}, 3, []v124Expected{{[8]int{4, 1, 4, 9, 3, 1, 3, 6}, "Тег @newpage запрещён внутри блока @note."}}},
+		{"unparsed closing", []model.Line{
+			v124TestOpen(t, "note", 2, 1), v124TestTag(t, "newpage", "", "", 3, 2),
+			v124TestInvalid(t, "} extra", 3, 2),
+		}, 0, []v124Expected{{[8]int{4, 1, 4, 9, 3, 1, 3, 6}, "Тег @newpage запрещён внутри блока @note."}}},
+		{"unclosed unknown nearest block hides note", []model.Line{
+			v124TestOpen(t, "note", 2, 1),
+			v124TestLine(t, "@unknown {", "block-start", 3, 2,
+				v124TestUnparsed(t, "@unknown", 1, 9), v124TestElement(t, "block-open", "{", "{", 10, 11)),
+			v124TestTag(t, "newpage", "", "", 3, 2), v124TestClose(t, 3, 2),
+		}, 0, nil},
+		{"ambiguous closing", []model.Line{
+			v124TestOpen(t, "note", 2, 1), v124TestTag(t, "newpage", "", "", 3, 2),
+			v124TestClose(t, 3, 2), v124TestClose(t, 3, 2),
+		}, 6, []v124Expected{{[8]int{4, 1, 4, 9, 3, 1, 3, 6}, "Тег @newpage запрещён внутри блока @note."}}},
+		{"duplicate closing does not reopen note", []model.Line{
+			v124TestOpen(t, "note", 2, 1), v124TestTag(t, "newpage", "", "", 3, 2),
+			v124TestClose(t, 3, 2),
+			// Логическая цепочка страниц сохраняется после фигурной границы.
+			v124TestTag(t, "newpage", "", "", 4, 3), v124TestClose(t, 3, 2),
+		}, 7, []v124Expected{{[8]int{4, 1, 4, 9, 3, 1, 3, 6}, "Тег @newpage запрещён внутри блока @note."}}},
+		{"crossing intervals", []model.Line{
+			v124TestOpen(t, "choice", 2, 1), v124TestOpen(t, "note", 3, 2),
+			v124TestTag(t, "newpage", "", "", 4, 3), v124TestClose(t, 3, 2), v124TestClose(t, 4, 3),
+		}, 6, nil},
+		{"crossing starts after declaration", []model.Line{
+			v124TestOpen(t, "note", 2, 1), v124TestTag(t, "newpage", "", "", 3, 2),
+			v124TestOpen(t, "choice", 3, 2), v124TestClose(t, 3, 2), v124TestClose(t, 5, 3),
+		}, 6, []v124Expected{
+			{[8]int{4, 1, 4, 9, 3, 1, 3, 6}, "Тег @newpage запрещён внутри блока @note."},
+			{[8]int{5, 1, 5, 8, 3, 1, 3, 6}, "Тег @choice запрещён внутри блока @note."},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := v124TestDocument(t, tc.body...)
+			if tc.errorLine != 0 {
+				v124TestParserError(t, result, tc.errorLine, "Граница блока не определена однозначно.")
+			}
+			v124TestRun(t, result, "current", tc.want)
+		})
+	}
+}
+
+func TestV124NewpageNearestPhysicalBlock(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body []model.Line
+		want []v124Expected
+	}{
+		{"unknown nearest name hides note", []model.Line{
+			v124TestOpen(t, "note", 2, 1),
+			v124TestLine(t, "@unknown {", "block-start", 3, 2,
+				v124TestUnparsed(t, "@unknown", 1, 9), v124TestElement(t, "block-open", "{", "{", 10, 11)),
+			v124TestTag(t, "newpage", "", "", 3, 2), v124TestClose(t, 4, 3), v124TestClose(t, 3, 2),
+		}, nil},
+		{"known nearest choice hides note", []model.Line{
+			v124TestOpen(t, "note", 2, 1), v124TestOpen(t, "choice", 3, 2),
+			v124TestTag(t, "newpage", "", "", 3, 2), v124TestClose(t, 4, 3), v124TestClose(t, 3, 2),
+		}, []v124Expected{{[8]int{4, 1, 4, 8, 3, 1, 3, 6}, "Тег @choice запрещён внутри блока @note."}}},
+		{"known inner note survives unclosed outer", []model.Line{
+			v124TestOpen(t, "choice", 2, 1), v124TestOpen(t, "note", 3, 2),
+			v124TestTag(t, "newpage", "", "", 2, 1), v124TestClose(t, 4, 3),
+		}, []v124Expected{{[8]int{5, 1, 5, 9, 4, 1, 4, 6}, "Тег @newpage запрещён внутри блока @note."}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := v124TestDocument(t, tc.body...)
+			if tc.name == "known inner note survives unclosed outer" {
+				v124TestParserError(t, result, 3, "Блок @choice не закрыт.")
+			}
+			v124TestRun(t, result, "current", tc.want)
+		})
+	}
+}
+
+func TestV124NewpageLiteralPhysicalContent(t *testing.T) {
+	for _, tc := range []struct {
+		tag    string
+		end    int
+		detail string
+	}{
+		{"editor", 8, "Тег @editor запрещён внутри блока @note."},
+		{"multifill", 11, "Тег @multifill запрещён внутри блока @note."},
+	} {
+		t.Run(tc.tag, func(t *testing.T) {
+			v124TestRun(t, v124TestDocument(t,
+				v124TestOpen(t, "note", 2, 1), v124TestOpen(t, tc.tag, 3, 2),
+				v124TestText(t, "@newpage", "@newpage", 4, 3),
+				// Ошибка экранирования не превращает литеральную строку в тег.
+				v124TestLine(t, `@newpage \`, "content", 4, 3,
+					v124TestElement(t, "content", "@newpage ", "@newpage ", 1, 10),
+					v124TestUnparsed(t, "\\", 10, 11)),
+				v124TestClose(t, 4, 3), v124TestClose(t, 3, 2)), "current", []v124Expected{
+				{[8]int{4, 1, 4, tc.end, 3, 1, 3, 6}, tc.detail},
+			})
+		})
+	}
+}
