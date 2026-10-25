@@ -123,6 +123,41 @@ func TestV171PartialLabelDoesNotCreateDuplicate(t *testing.T) {
 	}
 }
 
+func TestV171IncompleteAndFragmentedContent(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		first, second model.Line
+		want          []v171Expected
+	}{
+		{"content omits escaped prefix", v171TestLine(t, `\@Apple`, "content", 3, 2,
+			v171TestElement(t, "content", "Apple", "Apple", 3, 8)),
+			v171TestText(t, "Apple", "Apple", 3, 2), nil},
+		{"content omits escaped suffix", v171TestLine(t, `Apple\{x\}`, "content", 3, 2,
+			v171TestElement(t, "content", "Apple", "Apple", 1, 6)),
+			v171TestText(t, "Apple", "Apple", 3, 2), nil},
+		{"complete raw restores Unicode prefix and escaped suffix", v171TestLine(t, " \t🌞Apple\\{x\\} \t", "content", 3, 2,
+			v171TestElement(t, "content", "Apple", "Apple", 4, 9)),
+			v171TestText(t, `🌞apple\{x\}`, "🌞apple{x}", 3, 2), []v171Expected{{8, 1, 12, [][3]int{{7, 3, 14}}}}},
+		{"fragmented braces", v171TestLine(t, `\{Apple\}`, "content", 3, 2,
+			v171TestElement(t, "content", `\{Apple`, "{Apple", 1, 8), v171TestElement(t, "content", `\}`, "}", 8, 10)),
+			v171TestText(t, `\{apple\}`, "{apple}", 3, 2), []v171Expected{{8, 1, 10, [][3]int{{7, 1, 10}}}}},
+		{"fragmented backslash is decoded once", v171TestLine(t, `\\@Apple`, "content", 3, 2,
+			v171TestElement(t, "content", `\\`, `\`, 1, 3), v171TestElement(t, "content", "@Apple", "@Apple", 3, 9)),
+			v171TestText(t, `\@apple`, "@apple", 3, 2), nil},
+		{"fragmented gaps remain significant", v171TestLine(t, "A  B", "content", 3, 2,
+			v171TestElement(t, "content", "A", "A", 1, 2), v171TestElement(t, "content", "B", "B", 4, 5)),
+			v171TestText(t, "A B", "A B", 3, 2), nil},
+		{"fragmented gaps retained in duplicate", v171TestLine(t, "A  B", "content", 3, 2,
+			v171TestElement(t, "content", "A", "A", 1, 2), v171TestElement(t, "content", "B", "B", 4, 5)),
+			v171TestText(t, "a  b", "a  b", 3, 2), []v171Expected{{8, 1, 5, [][3]int{{7, 1, 5}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upper := []model.Line{v171TestText(t, "Question", "Question", 3, 2), v171TestTag(t, "answer", "content", "Answer", 3, 2)}
+			v171TestRun(t, v171TestMatching(t, upper, tc.first, tc.second, v171TestText(t, "Answer", "Answer", 3, 2)), "current", tc.want)
+		})
+	}
+}
+
 func TestV171LabelsAndEscaping(t *testing.T) {
 	for _, tc := range []struct {
 		name, raw1, value1, raw2, value2 string
