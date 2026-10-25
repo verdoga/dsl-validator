@@ -37,6 +37,13 @@ type v022Expected struct {
 	detail           string
 }
 
+// v022ErrorExpectation хранит код и явный диапазон сопутствующей ошибки.
+// location содержит строку, начало и исключающий конец в Unicode-колонках.
+type v022ErrorExpectation struct {
+	code     diagnostics.Code
+	location [3]int
+}
+
 func TestV022Tokens(t *testing.T) {
 	for _, tc := range []struct {
 		name, raw string
@@ -111,7 +118,12 @@ func TestV022Tokens(t *testing.T) {
 			if tc.name == "raw escapes not decoded" {
 				value = "he1{o}"
 			}
-			v022Run(t, v022Document(t, v022Text(t, tc.raw, value, 2, 1)), "current", tc.want, 1)
+			var wantErrors []v022ErrorExpectation
+			if tc.name == "underscore separates tokens" {
+				// _ по-прежнему разделяет токены V022, но сам нарушает V148.
+				wantErrors = []v022ErrorExpectation{{"V148", [3]int{3, 4, 5}}}
+			}
+			v022Run(t, v022Document(t, v022Text(t, tc.raw, value, 2, 1)), "current", tc.want, 1, wantErrors...)
 		})
 	}
 }
@@ -131,11 +143,11 @@ func TestV022WholeLinesAndContexts(t *testing.T) {
 		name, tag, raw string
 		elements       []model.Element
 		want           []v022Expected
-		wantV115       [][3]int
+		wantErrors     []v022ErrorExpectation
 	}{
 		{"HTML in literal comment", "editor", "<b>he1o</b>", []model.Element{v022Element(t, "content", "<b>he1o</b>", "<b>he1o</b>", 1)}, []v022Expected{{4, 4, 8, "Подозрительные цифры: 1 → l/i/і."}}, nil},
 		{"HTML attribute included", "editor", `<b title="he1o">ok</b>`, []model.Element{v022Element(t, "content", `<b title="he1o">ok</b>`, `<b title="he1o">ok</b>`, 1)}, []v022Expected{{4, 11, 15, "Подозрительные цифры: 1 → l/i/і."}}, nil},
-		{"HTML does not join tokens", "text", "he1<b>o</b>", []model.Element{v022Element(t, "content", "he1<b>o</b>", "he1<b>o</b>", 1)}, nil, [][3]int{{4, 4, 7}, {4, 8, 12}}},
+		{"HTML does not join tokens", "text", "he1<b>o</b>", []model.Element{v022Element(t, "content", "he1<b>o</b>", "he1<b>o</b>", 1)}, nil, []v022ErrorExpectation{{"V115", [3]int{4, 4, 7}}, {"V115", [3]int{4, 8, 12}}}},
 		{"entity not decoded", "text", "he&#49;o", []model.Element{v022Element(t, "content", "he&#49;o", "he&#49;o", 1)}, nil, nil},
 		{"table cells", "table", "he1o | w0rd", []model.Element{v022Element(t, "content", "he1o", "he1o", 1), v022Element(t, "content", "w0rd", "w0rd", 8)}, []v022Expected{{4, 1, 5, "Подозрительные цифры: 1 → l/i/і."}, {4, 8, 12, "Подозрительные цифры: 0 → o/о."}}, nil},
 		{"placeholder answer", "multifill", "_____{he1o}", []model.Element{v022Element(t, "placeholder", "_____{he1o}", "he1o", 1)}, []v022Expected{{4, 7, 11, "Подозрительные цифры: 1 → l/i/і."}}, nil},
@@ -144,7 +156,7 @@ func TestV022WholeLinesAndContexts(t *testing.T) {
 			body := v022Line(t, tc.raw, "content", 3, 2, tc.elements...)
 			v022Run(t, v022Document(t,
 				v022Line(t, "@"+tc.tag+" {", "block-start", 2, 1, v022Element(t, "tag", "@"+tc.tag, tc.tag, 1), v022Element(t, "block-open", "{", "{", len(tc.tag)+3)),
-				body, v022Line(t, "}", "block-end", 3, 2, v022Element(t, "block-close", "}", "}", 1))), "current", tc.want, 1, tc.wantV115...)
+				body, v022Line(t, "}", "block-end", 3, 2, v022Element(t, "block-close", "}", "}", 1))), "current", tc.want, 1, tc.wantErrors...)
 		})
 	}
 	t.Run("title", func(t *testing.T) {
@@ -344,9 +356,9 @@ func v022Text(t *testing.T, raw, value string, parent, depth int) model.Line {
 // v022Run проверяет V022 текущего запуска через штатный конвейер.
 // want содержит явные диапазоны с исключающим концом и конкретизации.
 // wantV037 задаёт точное число сопутствующих ошибок отсутствующего ID;
-// wantV115 задаёт явные диапазоны ошибок неподдерживаемых HTML-тегов.
+// wantErrors задаёт явные коды и диапазоны сопутствующих ошибок V115/V148.
 // флаг документа проверяется отдельно, строки и прежняя история сохраняются.
-func v022Run(t *testing.T, result *model.Result, processingID string, want []v022Expected, wantV037 int, wantV115 ...[3]int) {
+func v022Run(t *testing.T, result *model.Result, processingID string, want []v022Expected, wantV037 int, wantErrors ...v022ErrorExpectation) {
 	t.Helper()
 	before := v022Snapshot(t, result)
 	oldDocumentError := result.Document.HasErrors
@@ -366,7 +378,7 @@ func v022Run(t *testing.T, result *model.Result, processingID string, want []v02
 	if err := validator.Run(result, checks, processingID); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	var got, gotV115 []model.Diagnostic
+	var got, gotErrors []model.Diagnostic
 	gotV037 := 0
 	seenIDs := make(map[string]bool)
 	for i, entry := range result.Diagnostics {
@@ -388,8 +400,8 @@ func v022Run(t *testing.T, result *model.Result, processingID string, want []v02
 		if entry.DiagnosticCode == "V022" && entry.Source == processingID {
 			got = append(got, entry)
 		}
-		if entry.DiagnosticCode == "V115" && entry.Source == processingID {
-			gotV115 = append(gotV115, entry)
+		if (entry.DiagnosticCode == "V115" || entry.DiagnosticCode == "V148") && entry.Source == processingID {
+			gotErrors = append(gotErrors, entry)
 		}
 	}
 	if gotV037 != wantV037 {
@@ -416,20 +428,24 @@ func v022Run(t *testing.T, result *model.Result, processingID string, want []v02
 	if len(result.Processing) != processingCount+1 || len(result.Diagnostics) < diagnosticCount {
 		t.Fatal("unexpected processing count or lost diagnostic history")
 	}
-	if len(gotV115) != len(wantV115) {
-		t.Fatalf("current V115 count = %d, want %d", len(gotV115), len(wantV115))
+	if len(gotErrors) != len(wantErrors) {
+		t.Fatalf("current V115/V148 count = %d, want %d", len(gotErrors), len(wantErrors))
+	}
+	messages := map[diagnostics.Code]string{
+		"V115": "Использован неподдерживаемый HTML-тег.",
+		"V148": "Подчёркивания не образуют допустимый пропуск.\nконкретизация: Длина последовательности: 1; требуется 5.",
 	}
 	wantLineErrors := append([]bool{}, oldLineErrors...)
-	for i, expected := range wantV115 {
-		entry := gotV115[i]
-		location := model.Location{Start: model.Position{Line: expected[0], Column: expected[1]},
-			End: model.Position{Line: expected[0], Column: expected[2]}}
-		if entry.Location == nil || *entry.Location != location || entry.SeverityLevel != "error" ||
+	for i, expected := range wantErrors {
+		entry := gotErrors[i]
+		location := model.Location{Start: model.Position{Line: expected.location[0], Column: expected.location[1]},
+			End: model.Position{Line: expected.location[0], Column: expected.location[2]}}
+		if entry.DiagnosticCode != expected.code || entry.Location == nil || *entry.Location != location || entry.SeverityLevel != "error" ||
 			entry.DiagnosticScope != "line" || entry.Fatal || entry.RelatedLocations == nil || len(entry.RelatedLocations) != 0 ||
-			entry.Message != "Использован неподдерживаемый HTML-тег." {
-			t.Errorf("unexpected accompanying V115: %+v; want location %+v", entry, location)
+			entry.Message != messages[expected.code] {
+			t.Errorf("unexpected accompanying diagnostic: %+v; want %s at %+v", entry, expected.code, location)
 		}
-		wantLineErrors[expected[0]-1] = true
+		wantLineErrors[expected.location[0]-1] = true
 	}
 	if len(result.Lines) != len(wantLineErrors) {
 		t.Fatal("line count changed")
@@ -439,8 +455,8 @@ func v022Run(t *testing.T, result *model.Result, processingID string, want []v02
 			t.Errorf("line %d hasErrors = %v, want %v", line.Number, line.HasErrors, wantLineErrors[i])
 		}
 	}
-	if result.Document.HasErrors != (oldDocumentError || wantV037 > 0 || len(wantV115) > 0) {
-		t.Errorf("document.hasErrors = %v, want %v", result.Document.HasErrors, oldDocumentError || wantV037 > 0 || len(wantV115) > 0)
+	if result.Document.HasErrors != (oldDocumentError || wantV037 > 0 || len(wantErrors) > 0) {
+		t.Errorf("document.hasErrors = %v, want %v", result.Document.HasErrors, oldDocumentError || wantV037 > 0 || len(wantErrors) > 0)
 	}
 	previous := *result
 	previous.Lines = append([]model.Line{}, result.Lines...)
