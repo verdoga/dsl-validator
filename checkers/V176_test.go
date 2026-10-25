@@ -212,6 +212,84 @@ func TestV176UncertaintyAndBoundaries(t *testing.T) {
 	})
 }
 
+func TestV176ZeroWidthContent(t *testing.T) {
+	for _, position := range []struct {
+		name, raw string
+		start     int
+	}{
+		{"before text", "Spain", 1},
+		{"inside text", "Spain", 2},
+		{"at text end", "Spain", 6},
+		{"after text", "Spain \t", 8},
+	} {
+		for _, count := range []int{1, 2} {
+			for _, extended := range []bool{false, true} {
+				name := position.name + "/count=" + strconv.Itoa(count) + "/extended=" + strconv.FormatBool(extended)
+				t.Run(name, func(t *testing.T) {
+					empty, value := "", "Spain"
+					// Координаты заданы явно: нулевой content не занимает исходный текст.
+					text := model.Element{ElementType: "content", Raw: "Spain", Value: &value, Start: 1, End: 6, ErrorIDs: []string{}}
+					zero := model.Element{ElementType: "content", Raw: "", Value: &empty, Start: position.start, End: position.start, ErrorIDs: []string{}}
+					elements := []model.Element{text, zero}
+					if position.start == 1 {
+						elements = []model.Element{zero, text}
+					}
+					body := []model.Line{v176TestLine(t, position.raw, "content", 3, 2, elements...)}
+					if count == 2 {
+						body = append(body, v176TestLine(t, position.raw, "content", 3, 2, elements...))
+					}
+					if extended {
+						body = append(body, v176TestSeparator(t, "---", 3, 2), v176TestText(t, "First", "First", 3, 2), v176TestText(t, "Second", "Second", 3, 2))
+					}
+					var want [][4]int
+					if count < 2 {
+						want = [][4]int{{3, 1, 10, count}}
+					}
+					v176TestRun(t, v176TestBlock(t, "ordering", body...), want)
+				})
+			}
+		}
+	}
+	for _, extended := range []bool{false, true} {
+		t.Run("blank content/count=0/extended="+strconv.FormatBool(extended), func(t *testing.T) {
+			empty := ""
+			// По 1.14 ASCII-пробелы и табуляция дают пустое текстовое значение.
+			line := v176TestLine(t, " \t ", "content", 3, 2,
+				model.Element{ElementType: "content", Raw: " \t ", Value: &empty, Start: 1, End: 4, ErrorIDs: []string{}},
+				model.Element{ElementType: "content", Raw: "", Value: &empty, Start: 2, End: 2, ErrorIDs: []string{}})
+			body := []model.Line{line}
+			if extended {
+				body = append(body, v176TestSeparator(t, "---", 3, 2), v176TestText(t, "First", "First", 3, 2), v176TestText(t, "Second", "Second", 3, 2))
+			}
+			v176TestRun(t, v176TestBlock(t, "ordering", body...), [][4]int{{3, 1, 10, 0}})
+		})
+	}
+}
+
+func TestV176ZeroWidthContentAndUncertainty(t *testing.T) {
+	empty, value := "", "Spain"
+	covered := model.Element{ElementType: "content", Raw: "Spain", Value: &value, Start: 1, End: 6, ErrorIDs: []string{}}
+	whitespace := model.Element{ElementType: "content", Raw: " \t", Value: &empty, Start: 1, End: 3, ErrorIDs: []string{}}
+	zero := model.Element{ElementType: "content", Raw: "", Value: &empty, Start: 2, End: 2, ErrorIDs: []string{}}
+	for _, tc := range []struct {
+		name, raw string
+		elements  []model.Element
+		want      [][4]int
+	}{
+		{"known fragment after empty range", " \tSpain", []model.Element{whitespace, zero, {ElementType: "content", Raw: "Spain", Value: &value, Start: 3, End: 8, ErrorIDs: []string{}}}, [][4]int{{3, 1, 10, 1}}},
+		{"several empty ranges preserve coverage", "Spain", []model.Element{covered, zero, {ElementType: "content", Raw: "", Value: &empty, Start: 4, End: 4, ErrorIDs: []string{}}}, [][4]int{{3, 1, 10, 1}}},
+		{"uncovered trailing text remains uncertain", " \t?", []model.Element{whitespace, zero}, nil},
+		{"uncovered gap before empty range remains uncertain", " \t? ", []model.Element{whitespace, zero, {ElementType: "content", Raw: "", Value: &empty, Start: 5, End: 5, ErrorIDs: []string{}}}, nil},
+		{"empty range alone cannot cover text", "Spain", []model.Element{zero}, nil},
+		{"known fragment proves one row despite uncertainty", "Spain?", []model.Element{covered, zero}, [][4]int{{3, 1, 10, 1}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			line := v176TestLine(t, tc.raw, "content", 3, 2, tc.elements...)
+			v176TestRun(t, v176TestBlock(t, "ordering", line), tc.want)
+		})
+	}
+}
+
 func TestV176ContextsAndCoordinates(t *testing.T) {
 	t.Run("separate blocks", func(t *testing.T) {
 		v176TestRun(t, v176TestDocument(t, v176TestOpen(t, "ordering", 2, 1), v176TestClose(t, 3, 2), v176TestOpen(t, "ordering", 2, 1), v176TestText(t, "A", "A", 5, 2), v176TestClose(t, 5, 2)), [][4]int{{3, 1, 10, 0}, {5, 1, 10, 1}})

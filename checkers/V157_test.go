@@ -243,6 +243,202 @@ func TestV157SourceRangesAndBoundaries(t *testing.T) {
 	}
 }
 
+func TestV157ZeroWidthContent(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		parts     []model.Element
+		ordinary  [3]int
+		answer    [3]int
+	}{
+		{"before content", "Spain", []model.Element{
+			v157Element(t, "content", "", "", 1), v157Element(t, "content", "Spain", "Spain", 1)}, [3]int{5, 1, 6}, [3]int{5, 9, 14}},
+		{"inside content", "Spain", []model.Element{
+			v157Element(t, "content", "Spain", "Spain", 1), v157Element(t, "content", "", "", 2)}, [3]int{5, 1, 6}, [3]int{5, 9, 14}},
+		{"several inside content", "Spain", []model.Element{
+			v157Element(t, "content", "Spain", "Spain", 1), v157Element(t, "content", "", "", 2),
+			v157Element(t, "content", "", "", 2), v157Element(t, "content", "", "", 5)}, [3]int{5, 1, 6}, [3]int{5, 9, 14}},
+		{"after content", "Spain", []model.Element{
+			v157Element(t, "content", "Spain", "Spain", 1), v157Element(t, "content", "", "", 6)}, [3]int{5, 1, 6}, [3]int{5, 9, 14}},
+		{"between adjacent fragments", "Spain", []model.Element{
+			v157Element(t, "content", "Sp", "Sp", 1), v157Element(t, "content", "", "", 2),
+			v157Element(t, "content", "", "", 3), v157Element(t, "content", "ain", "ain", 3),
+			v157Element(t, "content", "", "", 5), v157Element(t, "content", "", "", 6)}, [3]int{5, 1, 6}, [3]int{5, 9, 14}},
+		{"outside source range", "  Spain  ", []model.Element{
+			v157Element(t, "content", "", "", 1), v157Element(t, "content", "Spain", "Spain", 3),
+			v157Element(t, "content", "", "", 9)}, [3]int{5, 3, 8}, [3]int{5, 11, 16}},
+	} {
+		for _, block := range []string{"choice", "multichoice"} {
+			t.Run(block+" "+tc.name, func(t *testing.T) {
+				ordinary := v157Line(t, tc.raw, "content", 3, 2, tc.parts...)
+				v157Run(t, v157Block(t, block, v157Inline(t, "answer", "Spain", "Spain", 3, 2), ordinary),
+					[]v157Expected{{tc.ordinary, [][3]int{{4, 9, 14}}}})
+				// Те же исходные фрагменты проверяются в прямом answer.
+				parts := []model.Element{v157Element(t, "tag", "@answer", "answer", 1)}
+				for _, element := range tc.parts {
+					element.Start, element.End = element.Start+8, element.End+8
+					parts = append(parts, element)
+				}
+				answer := v157Line(t, "@answer "+tc.raw, "tag", 3, 2, parts...)
+				v157Run(t, v157Block(t, block, v157Text(t, "Spain", "Spain", 3, 2), answer),
+					[]v157Expected{{tc.answer, [][3]int{{4, 1, 6}}}})
+			})
+		}
+	}
+	t.Run("inside tag range", func(t *testing.T) {
+		answer := v157Line(t, "@answer Spain", "tag", 3, 2,
+			v157Element(t, "tag", "@answer", "answer", 1), v157Element(t, "content", "", "", 2),
+			v157Element(t, "content", "Spain", "Spain", 9))
+		v157Run(t, v157Block(t, "choice", v157Text(t, "Spain", "Spain", 3, 2), answer),
+			[]v157Expected{{[3]int{5, 9, 14}, [][3]int{{4, 1, 6}}}})
+	})
+	t.Run("normalized empty content", func(t *testing.T) {
+		ordinary := v157Line(t, "\u00a0", "content", 3, 2,
+			v157Element(t, "content", "", "", 1), v157Element(t, "content", "\u00a0", "\u00a0", 1),
+			v157Element(t, "content", "", "", 2))
+		v157Run(t, v157Block(t, "choice", v157Inline(t, "answer", "Spain", "Spain", 3, 2), ordinary), nil)
+	})
+}
+
+func TestV157CompositeContent(t *testing.T) {
+	for _, tc := range []struct {
+		name, answerRaw, answerValue, raw string
+		parts                             []model.Element
+		want                              []v157Expected
+	}{
+		{"adjacent", "Spain", "Spain", "Spain", []model.Element{
+			v157Element(t, "content", "Sp", "Sp", 1), v157Element(t, "content", "ain", "ain", 3)},
+			[]v157Expected{{[3]int{5, 1, 6}, [][3]int{{4, 9, 14}}}}},
+		{"three fragments", "Spain", "Spain", "Spain", []model.Element{
+			v157Element(t, "content", "S", "S", 1), v157Element(t, "content", "pa", "pa", 2), v157Element(t, "content", "in", "in", 4)},
+			[]v157Expected{{[3]int{5, 1, 6}, [][3]int{{4, 9, 14}}}}},
+		{"source spaces and tab", "New York", "New York", "\t New \t York \t", []model.Element{
+			v157Element(t, "content", "New", "New", 3), v157Element(t, "content", "York", "York", 9)},
+			[]v157Expected{{[3]int{5, 3, 13}, [][3]int{{4, 9, 17}}}}},
+		{"empty element inside source gap", "New York", "New York", "New \t York", []model.Element{
+			v157Element(t, "content", "New", "New", 1), v157Element(t, "content", "", "", 5), v157Element(t, "content", "York", "York", 7)},
+			[]v157Expected{{[3]int{5, 1, 11}, [][3]int{{4, 9, 17}}}}},
+		{"spaces in values preserved until assembly", "New York", "New York", "New York", []model.Element{
+			v157Element(t, "content", "New ", "New ", 1), v157Element(t, "content", "York", "York", 5)},
+			[]v157Expected{{[3]int{5, 1, 9}, [][3]int{{4, 9, 17}}}}},
+		{"Unicode whitespace and case", "ёж юг", "ёж юг", "ЁЖ\u00a0\u2003ЮГ", []model.Element{
+			v157Element(t, "content", "ЁЖ\u00a0", "ЁЖ\u00a0", 1), v157Element(t, "content", "\u2003ЮГ", "\u2003ЮГ", 4)},
+			[]v157Expected{{[3]int{5, 1, 7}, [][3]int{{4, 9, 14}}}}},
+		{"Unicode punctuation", "ёж", "ёж", "«ЁЖ»", []model.Element{
+			v157Element(t, "content", "«Ё", "«Ё", 1), v157Element(t, "content", "Ж»", "Ж»", 3)},
+			[]v157Expected{{[3]int{5, 1, 5}, [][3]int{{4, 9, 11}}}}},
+		{"punctuation only strict match", "!!!", "!!!", "!!!", []model.Element{
+			v157Element(t, "content", "!", "!", 1), v157Element(t, "content", "!!", "!!", 2)},
+			[]v157Expected{{[3]int{5, 1, 4}, [][3]int{{4, 9, 12}}}}},
+		{"punctuation only different", "???", "???", "!!!", []model.Element{
+			v157Element(t, "content", "!", "!", 1), v157Element(t, "content", "!!", "!!", 2)}, nil},
+		{"escaped values remain authoritative", "a\\{b\\}", "a{b}", "a\\{b\\}", []model.Element{
+			v157Element(t, "content", "a\\{", "a{", 1), v157Element(t, "content", "b\\}", "b}", 4)},
+			[]v157Expected{{[3]int{5, 1, 7}, [][3]int{{4, 9, 15}}}}},
+		{"no repeated unescape strict punctuation", "\\\\\\{", "\\{", "\\\\\\{", []model.Element{
+			v157Element(t, "content", "\\\\", "\\", 1), v157Element(t, "content", "\\{", "{", 3)},
+			[]v157Expected{{[3]int{5, 1, 5}, [][3]int{{4, 9, 13}}}}},
+		{"no repeated unescape cannot erase slash", "\\{", "{", "\\\\\\{", []model.Element{
+			v157Element(t, "content", "\\\\", "\\", 1), v157Element(t, "content", "\\{", "{", 3)}, nil},
+		{"Unicode source columns", "🌍ёж", "🌍ёж", "🌍ЁЖ", []model.Element{
+			v157Element(t, "content", "🌍", "🌍", 1), v157Element(t, "content", "ЁЖ", "ЁЖ", 2)},
+			[]v157Expected{{[3]int{5, 1, 4}, [][3]int{{4, 9, 12}}}}},
+		{"normalized empty", "!!!", "!!!", "\u00a0\u2003", []model.Element{
+			v157Element(t, "content", "\u00a0", "\u00a0", 1), v157Element(t, "content", "\u2003", "\u2003", 2)}, nil},
+		{"source gap is not omitted", "NewYork", "NewYork", "New York", []model.Element{
+			v157Element(t, "content", "New", "New", 1), v157Element(t, "content", "York", "York", 5)}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ordinary := v157Line(t, tc.raw, "content", 3, 2, tc.parts...)
+			v157Run(t, v157Block(t, "choice", v157Inline(t, "answer", tc.answerRaw, tc.answerValue, 3, 2), ordinary), tc.want)
+		})
+	}
+	t.Run("inline and block answers form one group", func(t *testing.T) {
+		ordinary := v157Line(t, "Spain", "content", 3, 2,
+			v157Element(t, "content", "Sp", "Sp", 1), v157Element(t, "content", "ain", "ain", 3))
+		inline := v157Line(t, "@answer Spain", "tag", 3, 2, v157Element(t, "tag", "@answer", "answer", 1),
+			v157Element(t, "content", "Sp", "Sp", 9), v157Element(t, "content", "ain", "ain", 11))
+		blockLine := v157Line(t, "SPAIN!", "content", 6, 3,
+			v157Element(t, "content", "SPA", "SPA", 1), v157Element(t, "content", "", "", 2),
+			v157Element(t, "content", "IN!", "IN!", 4))
+		v157Run(t, v157Block(t, "multichoice", ordinary, inline, v157Open(t, "answer", 3, 2),
+			blockLine, v157Close(t, 6, 3), v157Text(t, "spain?", "spain?", 3, 2)),
+			[]v157Expected{{[3]int{5, 9, 14}, [][3]int{{4, 1, 6}, {7, 1, 7}, {9, 1, 7}}}})
+	})
+}
+
+func TestV157CompositeAnswers(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, ordinaryRaw, ordinaryValue string
+		parts                                 []model.Element
+		want                                  []v157Expected
+	}{
+		{"source spaces", "@answer New \t York", "New York", "New York", []model.Element{
+			v157Element(t, "content", "New", "New", 9), v157Element(t, "content", "York", "York", 15)},
+			[]v157Expected{{[3]int{5, 9, 19}, [][3]int{{4, 1, 9}}}}},
+		{"Unicode values", "@answer ЁЖ\u00a0\u2003ЮГ", "ёж юг", "ёж юг", []model.Element{
+			v157Element(t, "content", "ЁЖ\u00a0", "ЁЖ\u00a0", 9), v157Element(t, "content", "\u2003ЮГ", "\u2003ЮГ", 12)},
+			[]v157Expected{{[3]int{5, 9, 15}, [][3]int{{4, 1, 6}}}}},
+		{"no repeated unescape", "@answer \\\\\\{", "\\\\\\{", "\\{", []model.Element{
+			v157Element(t, "content", "\\\\", "\\", 9), v157Element(t, "content", "\\{", "{", 11)},
+			[]v157Expected{{[3]int{5, 9, 13}, [][3]int{{4, 1, 5}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parts := append([]model.Element{v157Element(t, "tag", "@answer", "answer", 1)}, tc.parts...)
+			answer := v157Line(t, tc.raw, "tag", 3, 2, parts...)
+			v157Run(t, v157Block(t, "multichoice", v157Text(t, tc.ordinaryRaw, tc.ordinaryValue, 3, 2), answer), tc.want)
+		})
+	}
+	for _, name := range []string{"choice", "multichoice"} {
+		t.Run(name+" block answer with source gap", func(t *testing.T) {
+			answer := v157Line(t, "New \t York", "content", 5, 3,
+				v157Element(t, "content", "New", "New", 1), v157Element(t, "content", "", "", 2),
+				v157Element(t, "content", "York", "York", 7))
+			v157Run(t, v157Block(t, name, v157Text(t, "New York", "New York", 3, 2),
+				v157Open(t, "answer", 3, 2), answer, v157Close(t, 5, 3)),
+				[]v157Expected{{[3]int{6, 1, 11}, [][3]int{{4, 1, 9}}}})
+		})
+	}
+}
+
+func TestV157AmbiguousCompositeContent(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		parts     []model.Element
+	}{
+		{"uncovered prefix", "!Spain", []model.Element{v157Element(t, "content", "Spain", "Spain", 2)}},
+		{"uncovered suffix", "Spain!", []model.Element{v157Element(t, "content", "Spain", "Spain", 1)}},
+		{"uncovered punctuation between fragments", "Sp!ain", []model.Element{
+			v157Element(t, "content", "Sp", "Sp", 1), v157Element(t, "content", "ain", "ain", 4)}},
+		{"uncovered letter between fragments", "SpXain", []model.Element{
+			v157Element(t, "content", "Sp", "Sp", 1), v157Element(t, "content", "ain", "ain", 4)}},
+		{"uncovered escape between fragments", "Sp\\{ain", []model.Element{
+			v157Element(t, "content", "Sp", "Sp", 1), v157Element(t, "content", "ain", "ain", 5)}},
+		{"empty element does not cover significant gap", "Sp!ain", []model.Element{
+			v157Element(t, "content", "Sp", "Sp", 1), v157Element(t, "content", "", "", 4), v157Element(t, "content", "ain", "ain", 4)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ordinary := v157Line(t, tc.raw, "content", 3, 2, tc.parts...)
+			v157Run(t, v157Block(t, "choice", v157Inline(t, "answer", "Spain", "Spain", 3, 2), ordinary), nil)
+			parts := []model.Element{v157Element(t, "tag", "@answer", "answer", 1)}
+			for _, element := range tc.parts {
+				element.Start, element.End = element.Start+8, element.End+8
+				parts = append(parts, element)
+			}
+			answer := v157Line(t, "@answer "+tc.raw, "tag", 3, 2, parts...)
+			v157Run(t, v157Block(t, "choice", v157Text(t, "Spain", "Spain", 3, 2), answer), nil)
+		})
+	}
+	t.Run("unparsed fragment between composite contents", func(t *testing.T) {
+		unparsed := v157Element(t, "unparsed", "{", "", 3)
+		unparsed.Value = nil
+		ordinary := v157Line(t, "Sp{ain", "content", 3, 2, v157Element(t, "content", "Sp", "Sp", 1), unparsed,
+			v157Element(t, "content", "ain", "ain", 4))
+		result := v157Block(t, "choice", v157Inline(t, "answer", "Spain", "Spain", 3, 2), ordinary)
+		v157ParserError(t, result, 5, 1)
+		v157Run(t, result, nil)
+	})
+}
+
 func TestV157AmbiguousValues(t *testing.T) {
 	for _, kind := range []model.LineType{"tag", "invalid"} {
 		t.Run(string(kind), func(t *testing.T) {

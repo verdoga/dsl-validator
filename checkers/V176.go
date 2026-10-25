@@ -172,10 +172,15 @@ func v176Ordinary(line diagnostics.Line) (filled, known bool) {
 	complete := true
 	for index := 0; index < line.ElementCount(); index++ {
 		element, _ := line.Element(index)
-		if strings.Trim(string(runes[cursor:element.Start()-1]), " \t") != "" {
+		start, end := element.Start()-1, element.End()-1
+		if start > cursor && strings.Trim(string(runes[cursor:start]), " \t") != "" {
 			complete = false
 		}
-		cursor = element.End() - 1
+		// Нулевой диапазон допустим внутри предыдущего, но не уменьшает
+		// уже покрытую часть исходной строки.
+		if end > cursor {
+			cursor = end
+		}
 		if element.Type() != "content" {
 			complete = false
 			continue

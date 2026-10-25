@@ -258,6 +258,105 @@ func TestV147LowerBlockAnswerBelongsToV166(t *testing.T) {
 		v147TestText(t, "B", "B", 9, 4), v147TestClose(t, 9, 4), v147TestClose(t, 4, 3)), "current", nil)
 }
 
+func TestV147RecoveredSeparatorUpperAndLower(t *testing.T) {
+	for _, name := range []string{"matching", "ordering"} {
+		for _, raw := range []string{"---", " \t---\t "} {
+			for _, eol := range []model.LineEnding{"\n", "\r\n"} {
+				for _, blockAnswer := range []bool{false, true} {
+					t.Run(name+"/"+strconv.Quote(raw)+"/"+strconv.Quote(string(eol))+"/block="+strconv.FormatBool(blockAnswer), func(t *testing.T) {
+						body := []model.Line{
+							v147TestOpen(t, name, 3, 2), v147TestText(t, "Question?", "Question?", 4, 3),
+							v147TestTag(t, "answer", "Yes", 4, 3), v147TestText(t, "Other?", "Other?", 4, 3),
+							v147TestUnparsed(t, raw, 4, 3), v147TestText(t, "Yes", "Yes", 4, 3),
+							v147TestTag(t, "answer", "No", 4, 3), v147TestText(t, "No", "No", 4, 3), v147TestClose(t, 4, 3),
+						}
+						want := [][3]int{{10, 1, 8}}
+						if blockAnswer {
+							body = []model.Line{
+								v147TestOpen(t, name, 3, 2), v147TestText(t, "Question?", "Question?", 4, 3),
+								v147TestOpen(t, "AnSwEr", 4, 3), v147TestText(t, "Yes", "Yes", 6, 4), v147TestClose(t, 6, 4),
+								v147TestText(t, "Other?", "Other?", 4, 3), v147TestUnparsed(t, raw, 4, 3), v147TestText(t, "Yes", "Yes", 4, 3),
+								v147TestOpen(t, "answer", 4, 3), v147TestText(t, "No", "No", 12, 4), v147TestClose(t, 12, 4),
+								v147TestText(t, "No", "No", 4, 3), v147TestClose(t, 4, 3),
+							}
+							want = [][3]int{{12, 1, 8}}
+						}
+						if name == "matching" {
+							want = nil // Нижний ответ принадлежит V166, верхний имеет владельца.
+						}
+						result := v147TestDocument(t, body...)
+						for i := range result.Lines {
+							result.Lines[i].LineEnding = eol
+						}
+						v147TestRun(t, result, "current", want)
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestV147RecoveredSeparatorAmbiguityAndNesting(t *testing.T) {
+	for _, name := range []string{"matching", "ordering"} {
+		for _, tc := range []struct {
+			name               string
+			body               []model.Line
+			matching, ordering [][3]int
+		}{
+			{"two recovered separators", []model.Line{v147TestText(t, "Question?", "Question?", 4, 3), v147TestTag(t, "answer", "Yes", 4, 3),
+				v147TestText(t, "Other?", "Other?", 4, 3), v147TestUnparsed(t, "---", 4, 3), v147TestText(t, "Yes", "Yes", 4, 3),
+				v147TestUnparsed(t, " \t--- ", 4, 3), v147TestText(t, "No", "No", 4, 3), v147TestTag(t, "answer", "No", 4, 3)}, [][3]int{{6, 1, 8}, {12, 1, 8}}, [][3]int{{6, 1, 8}, {12, 1, 8}}},
+			{"parsed and recovered separators", []model.Line{v147TestText(t, "Question?", "Question?", 4, 3), v147TestTag(t, "answer", "Yes", 4, 3),
+				v147TestText(t, "Other?", "Other?", 4, 3), v147TestSeparator(t, 4, 3), v147TestText(t, "Yes", "Yes", 4, 3),
+				v147TestUnparsed(t, "---", 4, 3), v147TestText(t, "No", "No", 4, 3), v147TestTag(t, "answer", "No", 4, 3)}, [][3]int{{6, 1, 8}, {12, 1, 8}}, [][3]int{{6, 1, 8}, {12, 1, 8}}},
+			{"nested answer separator ignored", []model.Line{v147TestText(t, "Question?", "Question?", 4, 3), v147TestOpen(t, "answer", 4, 3),
+				v147TestUnparsed(t, "---", 6, 4), v147TestClose(t, 6, 4), v147TestText(t, "Other?", "Other?", 4, 3), v147TestTag(t, "answer", "Yes", 4, 3),
+				v147TestUnparsed(t, "---", 4, 3), v147TestText(t, "Yes", "Yes", 4, 3), v147TestText(t, "No", "No", 4, 3)}, nil, nil},
+			{"nested hint is not own separator", []model.Line{v147TestText(t, "Question?", "Question?", 4, 3), v147TestTag(t, "answer", "Yes", 4, 3),
+				v147TestOpen(t, "hint", 4, 3), v147TestUnparsed(t, "---", 7, 4), v147TestClose(t, 7, 4), v147TestText(t, "Other?", "Other?", 4, 3),
+				v147TestTag(t, "answer", "No", 4, 3)}, [][3]int{{6, 1, 8}, {11, 1, 8}}, nil},
+			{"escaped separator is an ordinary item", []model.Line{v147TestText(t, "Question?", "Question?", 4, 3), v147TestTag(t, "answer", "Yes", 4, 3),
+				v147TestText(t, `\---`, "---", 4, 3), v147TestTag(t, "answer", "No", 4, 3)}, [][3]int{{6, 1, 8}, {8, 1, 8}}, nil},
+			{"NBSP is not a separator edge", []model.Line{v147TestText(t, "Question?", "Question?", 4, 3), v147TestTag(t, "answer", "Yes", 4, 3),
+				v147TestText(t, "\u00a0---", "\u00a0---", 4, 3), v147TestTag(t, "answer", "No", 4, 3)}, [][3]int{{6, 1, 8}, {8, 1, 8}}, nil},
+		} {
+			t.Run(name+"/"+tc.name, func(t *testing.T) {
+				body := append([]model.Line{v147TestOpen(t, name, 3, 2)}, tc.body...)
+				body = append(body, v147TestClose(t, 4, 3))
+				want := tc.ordering
+				if name == "matching" {
+					want = tc.matching
+				}
+				v147TestRun(t, v147TestDocument(t, body...), "current", want)
+			})
+		}
+	}
+}
+
+func TestV147RecoveredSeparatorContainerBoundaries(t *testing.T) {
+	for _, name := range []string{"matching", "ordering"} {
+		t.Run(name+"/outside separator and answer", func(t *testing.T) {
+			want := [][3]int{{10, 1, 8}}
+			if name == "matching" {
+				want = [][3]int{{6, 1, 8}, {10, 1, 8}}
+			}
+			v147TestRun(t, v147TestDocument(t, v147TestOpen(t, name, 3, 2),
+				v147TestText(t, "Question?", "Question?", 4, 3), v147TestTag(t, "answer", "Yes", 4, 3), v147TestText(t, "Other?", "Other?", 4, 3),
+				v147TestClose(t, 4, 3), v147TestUnparsed(t, "---", 3, 2), v147TestTag(t, "answer", "No", 3, 2)), "current", want)
+		})
+		t.Run(name+"/sibling cannot supply separator", func(t *testing.T) {
+			var want [][3]int
+			if name == "matching" {
+				want = [][3]int{{6, 1, 8}}
+			}
+			v147TestRun(t, v147TestDocument(t, v147TestOpen(t, name, 3, 2),
+				v147TestText(t, "Question?", "Question?", 4, 3), v147TestTag(t, "answer", "Yes", 4, 3), v147TestText(t, "Other?", "Other?", 4, 3), v147TestClose(t, 4, 3),
+				v147TestOpen(t, "matching", 3, 2), v147TestText(t, "Question?", "Question?", 9, 3), v147TestTag(t, "answer", "Yes", 9, 3),
+				v147TestUnparsed(t, "---", 9, 3), v147TestText(t, "Yes", "Yes", 9, 3), v147TestText(t, "No", "No", 9, 3), v147TestClose(t, 9, 3)), "current", want)
+		})
+	}
+}
+
 func TestV147SpecializedNesting(t *testing.T) {
 	for _, name := range []string{"example", "wordlist", "table", "script", "text", "key", "instr", "note", "alt", "hint", "fragment"} {
 		t.Run(name, func(t *testing.T) {
@@ -494,6 +593,15 @@ func v147TestText(t *testing.T, raw, value string, parent, depth int) model.Line
 func v147TestSeparator(t *testing.T, parent, depth int) model.Line {
 	t.Helper()
 	return v147TestLine(t, "---", "separator", parent, depth)
+}
+
+// v147TestUnparsed сохраняет исходную ошибочную строку; Document добавляет
+// настоящую диагностику парсера и связывает её с неразобранным диапазоном.
+func v147TestUnparsed(t *testing.T, raw string, parent, depth int) model.Line {
+	t.Helper()
+	return v147TestLine(t, raw, "invalid", parent, depth, model.Element{
+		ElementType: "unparsed", Raw: raw, Start: 1, End: utf8.RuneCountInString(raw) + 1, ErrorIDs: []string{},
+	})
 }
 
 // v147TestLine задаёт структуру входа без парсера или восстановления родителей.

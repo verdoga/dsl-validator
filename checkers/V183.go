@@ -24,12 +24,14 @@ type v183Label struct {
 }
 
 func checkV183(lines diagnostics.Lines, findings diagnostics.Findings) error {
+	bodies := v183Bodies(lines)
 	for number := 1; number <= lines.Len(); number++ {
 		block, _ := lines.Line(number)
 		if block.Type() != "block-start" || v183Tag(block) != "ordering" {
 			continue
 		}
-		children, known := v183Children(lines, block)
+		body := bodies[number]
+		children, known := body.children, !body.broken && body.last-number == body.size-1
 		if !known {
 			continue
 		}
@@ -62,47 +64,44 @@ func checkV183(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	return nil
 }
 
-// v183Children читает непосредственные конструкции по родителям модели.
-// Разорванная принадлежность и повторные или пересекающиеся закрытия неоднозначны.
-func v183Children(lines diagnostics.Lines, block diagnostics.Line) ([]diagnostics.Line, bool) {
-	var children []diagnostics.Line
-	closed := make(map[int]bool)
-	left := false
-	for number := block.Number() + 1; number <= lines.Len(); number++ {
+// v183Body хранит прямые конструкции и сводку поддерева, включая саму строку.
+// broken означает неоднозначное закрытие этого блока или его потомка.
+type v183Body struct {
+	children                   []diagnostics.Line
+	parent, last, size, closed int
+	broken                     bool
+}
+
+// v183Bodies строит локальный индекс за O(N) времени и памяти. Prepare гарантирует,
+// что родитель предшествует потомку: обратный обход сворачивает каждое ребро один раз.
+// Пропуск чужих строк обнаруживается по длине диапазона и размеру поддерева;
+// закрытие должно быть единственным и последним потомком своего блока.
+func v183Bodies(lines diagnostics.Lines) []v183Body {
+	bodies := make([]v183Body, lines.Len()+1)
+	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
-		ancestor := line
-		belongs, afterClose := false, false
-		for parent, found := ancestor.ParentLine(); found; parent, found = ancestor.ParentLine() {
-			afterClose = afterClose || closed[parent]
-			if parent == block.Number() {
-				belongs = true
-				break
-			}
-			if parent < block.Number() {
-				break
-			}
-			ancestor, _ = lines.Line(parent)
-		}
-		if !belongs {
-			left = true
-			continue
-		}
-		if left || afterClose {
-			return nil, false
-		}
-		parent, _ := line.ParentLine()
+		body := &bodies[number]
+		body.parent, _ = line.ParentLine()
+		body.last, body.size = number, 1
+		parent := &bodies[body.parent]
 		if line.Type() == "block-end" {
-			if strings.Trim(line.Raw(), " \t") != "}" {
-				return nil, false
-			}
-			closed[parent] = true
-			continue
-		}
-		if parent == block.Number() && strings.Trim(line.Raw(), " \t") != "" {
-			children = append(children, line)
+			parent.broken = parent.broken || parent.closed != 0 || strings.Trim(line.Raw(), " \t") != "}"
+			parent.closed = number
+		} else if strings.Trim(line.Raw(), " \t") != "" {
+			parent.children = append(parent.children, line)
 		}
 	}
-	return children, true
+	for number := lines.Len(); number > 0; number-- {
+		body := &bodies[number]
+		body.broken = body.broken || body.closed != 0 && body.closed != body.last
+		parent := &bodies[body.parent]
+		parent.broken = parent.broken || body.broken
+		parent.size += body.size
+		if body.last > parent.last {
+			parent.last = body.last
+		}
+	}
+	return bodies
 }
 
 func v183Tag(line diagnostics.Line) string {
@@ -176,24 +175,36 @@ func v183Text(line diagnostics.Line) (label v183Label, ordinary, known bool) {
 	}
 	var text strings.Builder
 	cursor := 0
+	fragment := false
 	for index := 0; index < line.ElementCount(); index++ {
 		element, _ := line.Element(index)
 		if element.Type() != "content" {
 			return label, true, false
 		}
-		gap := string(raw[cursor : element.Start()-1])
-		if strings.Trim(gap, " \t") != "" {
-			return label, true, false
-		}
-		if index != 0 {
-			text.WriteString(gap)
-		}
 		value, present := element.Value()
 		if !present {
 			return label, true, false
 		}
+		// Пустая отметка может лежать внутри предыдущего занятого диапазона.
+		// Она не потребляет исходник и не создаёт пробел перед первым фрагментом.
+		if element.Start() == element.End() && value == "" {
+			continue
+		}
+		gap := ""
+		if element.Start()-1 >= cursor {
+			gap = string(raw[cursor : element.Start()-1])
+		}
+		if strings.Trim(gap, " \t") != "" {
+			return label, true, false
+		}
+		if fragment {
+			text.WriteString(gap)
+		}
 		text.WriteString(value)
-		cursor = element.End() - 1
+		fragment = true
+		if element.End()-1 > cursor {
+			cursor = element.End() - 1
+		}
 	}
 	label.text = text.String()
 	return label, true, strings.Trim(string(raw[cursor:]), " \t") == ""

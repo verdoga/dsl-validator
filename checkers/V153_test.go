@@ -164,6 +164,68 @@ func TestV153TextRanges(t *testing.T) {
 	})
 }
 
+func TestV153FragmentedAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		ranges    [][2]int
+		want      [][5]int
+	}{
+		{"whole answer", "_____{x _____{y}", [][2]int{{1, 17}}, [][5]int{{4, 6, 7, 1, 6}}},
+		{"uncovered space", "_____{x _____{y}", [][2]int{{1, 8}, {9, 17}}, [][5]int{{4, 6, 7, 1, 6}}},
+		{"adjacent fragments", "_____{x _____{y}", [][2]int{{1, 9}, {9, 17}}, [][5]int{{4, 6, 7, 1, 6}}},
+		{"split underscores and braces", "_____{x _____{y}", [][2]int{{1, 3}, {3, 6}, {6, 8}, {9, 11}, {11, 14}, {14, 17}}, [][5]int{{4, 6, 7, 1, 6}}},
+		{"uncovered tab", "_____{x\t_____{y}", [][2]int{{1, 8}, {9, 17}}, [][5]int{{4, 6, 7, 1, 6}}},
+		{"uncovered mixed whitespace", "_____{x \t  _____{y}", [][2]int{{1, 8}, {12, 20}}, [][5]int{{4, 6, 7, 1, 6}}},
+		{"uncovered Unicode spaces", "_____{x\u00a0\u2003_____{y}", [][2]int{{1, 8}, {10, 18}}, [][5]int{{4, 6, 7, 1, 6}}},
+		{"Unicode columns", "😀е\u0301_____{я\t_____{б}", [][2]int{{1, 11}, {12, 20}}, [][5]int{{4, 9, 10, 4, 9}}},
+		{"unclosed fragmented answer", "_____{x _____{y", [][2]int{{1, 8}, {9, 16}}, [][5]int{{4, 6, 7, 1, 6}}},
+		{"resume after closing", "_____{x _____{y} _____{z}", [][2]int{{1, 8}, {9, 17}, {18, 26}}, [][5]int{{4, 6, 7, 1, 6}, {4, 23, 24, 18, 23}}},
+		{"escaped closing in fragment", `_____{x \}_____{y} _____{z}`, [][2]int{{1, 8}, {9, 10}, {10, 19}, {20, 28}}, [][5]int{{4, 6, 7, 1, 6}, {4, 25, 26, 20, 25}}},
+		{"paired slashes before closing", `_____{x \\}_____{y}`, [][2]int{{1, 8}, {9, 10}, {10, 12}, {12, 20}}, [][5]int{{4, 6, 7, 1, 6}, {4, 17, 18, 12, 17}}},
+		{"alternative service group", "_____{a}{x _____{y} _____{z}", [][2]int{{1, 11}, {12, 20}, {21, 29}}, [][5]int{{4, 6, 7, 1, 6}, {4, 26, 27, 21, 26}}},
+		{"separated brace stays separate", "_____ {x _____{y}", [][2]int{{1, 6}, {7, 9}, {10, 18}}, [][5]int{{4, 15, 16, 10, 15}}},
+		{"tab cannot join underscores", "___\t__{x}", [][2]int{{1, 4}, {5, 10}}, nil},
+		{"Unicode space cannot join underscores", "___\u00a0__{x}", [][2]int{{1, 4}, {5, 10}}, nil},
+		{"fragmented escaped run", `\_____{x}`, [][2]int{{1, 2}, {2, 4}, {4, 10}}, nil},
+		{"fragmented long run", "______{x}", [][2]int{{1, 2}, {2, 10}}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []rune(tc.raw)
+			var elements []model.Element
+			for _, span := range tc.ranges {
+				elements = append(elements, v153TestElement(t, "unparsed", string(raw[span[0]-1:span[1]-1]), "", span[0]))
+			}
+			line := v153TestLine(t, tc.raw, "invalid", 3, 2, elements...)
+			v153TestRun(t, v153TestDocument(t, line), "current", tc.want)
+		})
+	}
+}
+
+func TestV153TextBoundaries(t *testing.T) {
+	t.Run("media source excluded but alt checked", func(t *testing.T) {
+		line := v153TestLine(t, `@media image "_____{x}.png"`, "tag", 3, 2,
+			v153TestElement(t, "tag", "@media", "media", 1),
+			v153TestElement(t, "media-type", "image", "image", 8),
+			v153TestElement(t, "source", `"_____{x}.png"`, "_____{x}.png", 14))
+		v153TestRun(t, v153TestDocument(t, line, v153TestTag(t, "alt", "content", "_____{y}", 3, 2)),
+			"current", [][5]int{{5, 11, 12, 6, 11}})
+	})
+	t.Run("table separator between whitespace remains boundary", func(t *testing.T) {
+		line := v153TestLine(t, "_____{x\t|\u00a0_____{y}", "content", 4, 3,
+			v153TestElement(t, "unparsed", "_____{x", "", 1),
+			v153TestElement(t, "unparsed", "_____{y}", "", 11))
+		v153TestRun(t, v153TestDocument(t, v153TestOpen(t, "table", 3, 2), line, v153TestClose(t, 4, 3)),
+			"current", [][5]int{{5, 6, 7, 1, 6}, {5, 16, 17, 11, 16}})
+	})
+	t.Run("zero width content does not reset answer", func(t *testing.T) {
+		line := v153TestLine(t, "_____{x _____{y}", "invalid", 3, 2,
+			v153TestElement(t, "unparsed", "_____{x", "", 1),
+			v153TestElement(t, "content", "", "", 8),
+			v153TestElement(t, "unparsed", "_____{y}", "", 9))
+		v153TestRun(t, v153TestDocument(t, line), "current", [][5]int{{4, 6, 7, 1, 6}})
+	})
+}
+
 func TestV153DeclarationsAndBlocks(t *testing.T) {
 	for _, tc := range []struct {
 		name string

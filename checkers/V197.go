@@ -24,6 +24,17 @@ type v197Unit struct {
 	signature string
 	span      v197Range
 }
+
+// v197Group сохраняет порядок вхождений и число разных физических ветвей.
+// primary — первое вхождение во второй ветви; lastBranch предотвращает
+// повторный учёт ветви при нескольких одинаковых единицах или include.
+type v197Group struct {
+	occurrences []v197Range
+	primary     v197Range
+	branches    int
+	lastBranch  int
+}
+
 type v197Document struct {
 	lines     diagnostics.Lines
 	ends      map[int]int
@@ -65,49 +76,47 @@ func checkV197(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if !valid || len(branches) < 2 {
 			continue
 		}
-		units := make([][]v197Unit, len(branches))
+		// Индекс заполняется в порядке исходника одним проходом по единицам.
+		// Порядок групп задаёт первая ветвь, а не обход карты или второй ветви.
+		index := make(map[string]*v197Group)
+		var groups []*v197Group
 		for i, start := range branches {
 			end := doc.ends[n] + 1
 			if i+1 < len(branches) {
 				end = branches[i+1]
 			}
-			units[i], _ = doc.collect(start+1, end, n, false)
-		}
-		seen := make(map[string]bool)
-		for _, candidate := range units[0] {
-			if seen[candidate.signature] {
-				continue
-			}
-			seen[candidate.signature] = true
-			var occurrences []v197Range
-			var primary v197Range
-			common := true
-			for branch, material := range units {
-				found := false
-				for _, unit := range material {
-					if unit.signature != candidate.signature {
+			units, _ := doc.collect(start+1, end, n, false)
+			for _, unit := range units {
+				group := index[unit.signature]
+				if group == nil {
+					if i != 0 {
 						continue
 					}
-					if branch == 1 && !found {
-						primary = unit.span
+					group = &v197Group{lastBranch: -1}
+					index[unit.signature] = group
+					groups = append(groups, group)
+				}
+				if group.lastBranch != i {
+					group.branches++
+					group.lastBranch = i
+					if i == 1 {
+						group.primary = unit.span
 					}
-					found = true
-					occurrences = append(occurrences, unit.span)
 				}
-				if !found {
-					common = false
-					break
-				}
+				group.occurrences = append(group.occurrences, unit.span)
 			}
-			if !common {
+		}
+		for _, group := range groups {
+			if group.branches != len(branches) {
 				continue
 			}
+			primary := group.primary
 			occurrence, err := findings.Add(primary[0], primary[1], primary[2], primary[3], "Проверьте, следует ли вынести этот материал перед блоком @variants.")
 			if err != nil {
 				return err
 			}
 			unique := map[v197Range]bool{primary: true}
-			for _, span := range occurrences {
+			for _, span := range group.occurrences {
 				if unique[span] {
 					continue
 				}

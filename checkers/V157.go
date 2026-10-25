@@ -101,38 +101,48 @@ func v157Tag(line diagnostics.Line) string {
 	return strings.ToLower(name)
 }
 
-// v157ReadOption принимает только целиком и однозначно выделенную подпись.
-// Value уже содержит результат общей синтаксической обработки. Неразобранные
-// части, несколько content и непокрытый значимый остаток не склеиваются.
+// v157ReadOption собирает подпись из готовых Value и исходных пробельных
+// промежутков между content. Экранирование повторно не снимается, нормализация
+// выполняется после сборки. Непокрытый значимый остаток делает подпись неизвестной.
 func v157ReadOption(line diagnostics.Line, correct bool) (v157Option, bool) {
 	option := v157Option{line: line.Number(), correct: correct}
 	raw := []rune(line.Raw())
+	var label strings.Builder
 	cursor := 0
 	for index := 0; index < line.ElementCount(); index++ {
 		element, _ := line.Element(index)
-		if strings.Trim(string(raw[cursor:element.Start()-1]), " \t") != "" {
+		value, present := element.Value()
+		// Пустая вставка не занимает исходный текст, в том числе внутри уже
+		// покрытого диапазона, и не сдвигает курсор или диапазон подписи.
+		if element.Type() == "content" && present && value == "" && element.Start() == element.End() {
+			continue
+		}
+		start, end := element.Start()-1, element.End()-1
+		if start < cursor || strings.Trim(string(raw[cursor:start]), " \t") != "" {
 			return v157Option{}, false
 		}
-		cursor = element.End() - 1
 		switch element.Type() {
 		case "tag":
-			if line.Type() != "tag" {
+			if line.Type() != "tag" || option.start != 0 {
 				return v157Option{}, false
 			}
 		case "content":
-			if option.start != 0 {
-				return v157Option{}, false
-			}
-			value, present := element.Value()
 			if !present {
 				return v157Option{}, false
 			}
-			option.label = v157Spaces(strings.ToLower(value))
-			option.start, option.end = element.Start(), element.End()
+			if option.start == 0 {
+				option.start = element.Start()
+			} else {
+				label.WriteString(string(raw[cursor:start]))
+			}
+			label.WriteString(value)
+			option.end = element.End()
 		default:
 			return v157Option{}, false
 		}
+		cursor = end
 	}
+	option.label = v157Spaces(strings.ToLower(label.String()))
 	if strings.Trim(string(raw[cursor:]), " \t") != "" || option.label == "" {
 		return v157Option{}, false
 	}

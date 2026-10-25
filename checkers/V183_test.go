@@ -177,6 +177,40 @@ func TestV183ValueRepresentations(t *testing.T) {
 	})
 }
 
+func TestV183ZeroWidthContent(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, other string
+		elements         []model.Element
+		want             []v183Want
+	}{
+		{"empty inside occupied range", "Spain", "spain", []model.Element{
+			v183TestElement(t, "content", "Spain", "Spain", 1), v183TestElement(t, "content", "", "", 2)},
+			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
+		{"empty before and after occupied range", "Spain", "spain", []model.Element{
+			v183TestElement(t, "content", "", "", 1), v183TestElement(t, "content", "Spain", "Spain", 1), v183TestElement(t, "content", "", "", 6)},
+			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
+		{"empty before indented content", "  Spain\t", "spain", []model.Element{
+			v183TestElement(t, "content", "", "", 2), v183TestElement(t, "content", "Spain", "Spain", 3)},
+			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 3, 8}}}}},
+		{"empty inside first fragment", "Spain", "spain", []model.Element{
+			v183TestElement(t, "content", "Sp", "Sp", 1), v183TestElement(t, "content", "", "", 2), v183TestElement(t, "content", "ain", "ain", 3)},
+			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
+		{"empty in whitespace keeps full gap", "New \tYork", "new \tyork", []model.Element{
+			v183TestElement(t, "content", "New", "New", 1), v183TestElement(t, "content", "", "", 5), v183TestElement(t, "content", "York", "York", 6)},
+			[]v183Want{{[3]int{10, 1, 10}, [][3]int{{9, 1, 10}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := v183TestLine(t, tc.raw, "content", 3, 2, tc.elements...)
+			v183TestRun(t, v183TestExpanded(t, first, v183TestText(t, tc.other, tc.other, 3, 2)), tc.want)
+		})
+	}
+	t.Run("empty marker in upper item retains associated answer", func(t *testing.T) {
+		result := v183TestExpanded(t, v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2))
+		result.Lines[3].Elements = append(result.Lines[3].Elements, v183TestElement(t, "content", "", "", 2))
+		v183TestRun(t, result, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}})
+	})
+}
+
 func TestV183AnswerAssociation(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -327,21 +361,121 @@ func TestV183ContextsAndLifecycle(t *testing.T) {
 	}
 }
 
+func TestV183StructuralBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body []model.Line
+		want []v183Want
+	}{
+		{"unclosed block retains determinable positions", append(v183TestUpper(t),
+			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2)),
+			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
+		{"membership returns after unrelated line", append(v183TestUpper(t),
+			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "outside", "outside", 2, 1), v183TestText(t, "first", "first", 3, 2), v183TestClose(t, 3, 2)), nil},
+		{"membership returns after closing", append(v183TestUpper(t),
+			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2), v183TestClose(t, 3, 2), v183TestText(t, "late", "late", 3, 2)), nil},
+		{"membership returns through descendant after closing", append(v183TestUpper(t),
+			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2),
+			v183TestOpen(t, "hint", 3, 2), v183TestClose(t, 3, 2), v183TestText(t, "late", "late", 11, 3)), nil},
+		{"nested block returns after its closing", append(v183TestUpper(t),
+			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2),
+			v183TestOpen(t, "hint", 3, 2), v183TestClose(t, 11, 3), v183TestText(t, "late", "late", 11, 3), v183TestClose(t, 3, 2)), nil},
+		{"crossing nested closing", append(v183TestUpper(t),
+			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2),
+			v183TestOpen(t, "hint", 3, 2), v183TestClose(t, 3, 2), v183TestClose(t, 11, 3)), nil},
+		{"malformed nested closing", append(v183TestUpper(t),
+			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2),
+			v183TestOpen(t, "hint", 3, 2), v183TestLine(t, "} text", "block-end", 11, 3, v183TestElement(t, "block-close", "}", "}", 1))), nil},
+		{"closed nested block followed by direct position", append(v183TestUpper(t),
+			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2),
+			v183TestOpen(t, "hint", 3, 2), v183TestText(t, "ignored", "ignored", 10, 3), v183TestClose(t, 10, 3), v183TestText(t, "first", "first", 3, 2), v183TestClose(t, 3, 2)),
+			[]v183Want{{[3]int{13, 1, 6}, [][3]int{{9, 1, 6}}}}},
+		{"unrelated malformed block does not invalidate ordering", append(v183TestUpper(t),
+			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2), v183TestClose(t, 3, 2),
+			v183TestOpen(t, "hint", 2, 1), v183TestClose(t, 12, 2), v183TestText(t, "late", "late", 12, 2)),
+			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := append([]model.Line{v183TestOpen(t, "ordering", 2, 1)}, tc.body...)
+			v183TestRun(t, v183TestDocument(t, body...), tc.want)
+		})
+	}
+	t.Run("unrelated line before first descendant", func(t *testing.T) {
+		body := append([]model.Line{v183TestText(t, "outside", "outside", 2, 1)}, v183TestUpper(t)...)
+		body = append(body, v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2))
+		v183TestRun(t, v183TestBlock(t, "ordering", body...), nil)
+	})
+}
+
+func TestV183ManyIndependentBlocks(t *testing.T) {
+	result, want := v183TestManyBlocks(t, 256)
+	v183TestRun(t, result, want)
+}
+
+// BenchmarkV183ManyIndependentBlocks измеряет штатный конвейер на растущем
+// числе соседних ordering; порогов времени и подмены выборки Prepare нет.
+func BenchmarkV183ManyIndependentBlocks(b *testing.B) {
+	for _, count := range []int{32, 128, 512} {
+		b.Run(strconv.Itoa(count), func(b *testing.B) {
+			original, _ := v183TestManyBlocks(b, count)
+			registry := v183TestRegistry(b)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				result := *original
+				checks, err := validator.Prepare(&result, registry)
+				if err != nil {
+					b.Fatal(err)
+				}
+				result.Processing = append(result.Processing, model.Processing{ID: "benchmark", Tool: "dsl-validator"})
+				if err := validator.Run(&result, checks, "benchmark"); err != nil {
+					b.Fatal(err)
+				}
+				found := 0
+				for _, entry := range result.Diagnostics {
+					if entry.Source == "benchmark" && entry.DiagnosticCode == "V183" {
+						found++
+					}
+				}
+				if found != count {
+					b.Fatalf("V183 count = %d, want %d", found, count)
+				}
+			}
+		})
+	}
+}
+
+// v183TestManyBlocks задаёт независимые блоки с одной группой повторов в каждом.
+func v183TestManyBlocks(t testing.TB, count int) (*model.Result, []v183Want) {
+	t.Helper()
+	var body []model.Line
+	var want []v183Want
+	for index := 0; index < count; index++ {
+		number := 3 + 9*index
+		body = append(body, v183TestOpen(t, "ordering", 2, 1),
+			v183TestText(t, "A", "A", number, 2), v183TestInline(t, "answer", "First", number, 2),
+			v183TestText(t, "B", "B", number, 2), v183TestInline(t, "answer", "First", number, 2),
+			v183TestSeparator(t, "---", number, 2), v183TestText(t, "First", "First", number, 2), v183TestText(t, "first", "first", number, 2), v183TestClose(t, number, 2))
+		want = append(want, v183Want{[3]int{number + 7, 1, 6}, [][3]int{{number + 6, 1, 6}}})
+	}
+	return v183TestDocument(t, body...), want
+}
+
 // v183TestUpper задаёт два элемента с независимо заданными ответами.
-func v183TestUpper(t *testing.T) []model.Line {
+func v183TestUpper(t testing.TB) []model.Line {
 	t.Helper()
 	return []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "answer", "First", 3, 2), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}
 }
 
 // v183TestExpanded помещает нижние строки начиная со строки 9 документа.
-func v183TestExpanded(t *testing.T, lower ...model.Line) *model.Result {
+func v183TestExpanded(t testing.TB, lower ...model.Line) *model.Result {
 	t.Helper()
 	body := append(v183TestUpper(t), v183TestSeparator(t, "---", 3, 2))
 	return v183TestBlock(t, "ordering", append(body, lower...)...)
 }
 
 // v183TestRun проверяет полный конвейер, исходные диапазоны и историю модели.
-func v183TestRun(t *testing.T, result *model.Result, want []v183Want) {
+func v183TestRun(t testing.TB, result *model.Result, want []v183Want) {
 	t.Helper()
 	before := v183TestSnapshot(t, result)
 	var original model.Result
@@ -422,13 +556,13 @@ func v183TestRun(t *testing.T, result *model.Result, want []v183Want) {
 }
 
 // v183TestUnparsed задаёт неразобранную область; исходную ошибку добавляет Document.
-func v183TestUnparsed(t *testing.T, raw string, kind model.LineType, parent, depth int) model.Line {
+func v183TestUnparsed(t testing.TB, raw string, kind model.LineType, parent, depth int) model.Line {
 	t.Helper()
 	return v183TestLine(t, raw, kind, parent, depth, model.Element{ElementType: "unparsed", Raw: raw, Start: 1, End: utf8.RuneCountInString(raw) + 1, ErrorIDs: []string{}})
 }
 
 // v183TestParserError сохраняет исходную ошибку границ блока без фиктивных элементов.
-func v183TestParserError(t *testing.T, result *model.Result, number int) {
+func v183TestParserError(t testing.TB, result *model.Result, number int) {
 	t.Helper()
 	id := "boundary-" + strconv.Itoa(len(result.Diagnostics)+1)
 	result.Diagnostics = append(result.Diagnostics, model.Diagnostic{ID: id, Source: "parser", DiagnosticCode: "fixture", SeverityLevel: "error", DiagnosticScope: "line", Message: "Неоднозначные границы блока.", RelatedLocations: []model.Location{}, Location: &model.Location{Start: model.Position{Line: number, Column: 1}, End: model.Position{Line: number, Column: utf8.RuneCountInString(result.Lines[number-1].Raw) + 1}}})
@@ -437,13 +571,13 @@ func v183TestParserError(t *testing.T, result *model.Result, number int) {
 
 // v183TestElement сохраняет явные исходное и семантическое значения.
 // Вычисление длины используется только для входа; ожидания заданы числами.
-func v183TestElement(t *testing.T, kind model.ElementType, raw, value string, start int) model.Element {
+func v183TestElement(t testing.TB, kind model.ElementType, raw, value string, start int) model.Element {
 	t.Helper()
 	return model.Element{ElementType: kind, Raw: raw, Value: &value, Start: start, End: start + utf8.RuneCountInString(raw), ErrorIDs: []string{}}
 }
 
 // v183TestLine задаёт структуру строки без повторного разбора DSL.
-func v183TestLine(t *testing.T, raw string, kind model.LineType, parent, depth int, elements ...model.Element) model.Line {
+func v183TestLine(t testing.TB, raw string, kind model.LineType, parent, depth int, elements ...model.Element) model.Line {
 	t.Helper()
 	line := model.Line{Raw: raw, LineType: kind, NestingLevel: depth, LineEnding: "\n", Elements: append([]model.Element{}, elements...)}
 	if parent != 0 {
@@ -453,20 +587,20 @@ func v183TestLine(t *testing.T, raw string, kind model.LineType, parent, depth i
 }
 
 // v183TestOpen задаёт блочное объявление без параметров с явным родителем.
-func v183TestOpen(t *testing.T, name string, parent, depth int) model.Line {
+func v183TestOpen(t testing.TB, name string, parent, depth int) model.Line {
 	t.Helper()
 	return v183TestLine(t, "@"+name+" {", "block-start", parent, depth,
 		v183TestElement(t, "tag", "@"+name, strings.ToLower(name), 1), v183TestElement(t, "block-open", "{", "{", len(name)+3))
 }
 
 // v183TestClose задаёт закрытие указанного блока.
-func v183TestClose(t *testing.T, parent, depth int) model.Line {
+func v183TestClose(t testing.TB, parent, depth int) model.Line {
 	t.Helper()
 	return v183TestLine(t, "}", "block-end", parent, depth, v183TestElement(t, "block-close", "}", "}", 1))
 }
 
 // v183TestInline задаёт известный тег с обычным содержимым без экранирования.
-func v183TestInline(t *testing.T, name, content string, parent, depth int) model.Line {
+func v183TestInline(t testing.TB, name, content string, parent, depth int) model.Line {
 	t.Helper()
 	raw := "@" + name
 	elements := []model.Element{v183TestElement(t, "tag", raw, strings.ToLower(name), 1)}
@@ -478,19 +612,19 @@ func v183TestInline(t *testing.T, name, content string, parent, depth int) model
 }
 
 // v183TestText сохраняет исходное и семантическое содержимое независимо.
-func v183TestText(t *testing.T, raw, value string, parent, depth int) model.Line {
+func v183TestText(t testing.TB, raw, value string, parent, depth int) model.Line {
 	t.Helper()
 	return v183TestLine(t, raw, "content", parent, depth, v183TestElement(t, "content", raw, value, 1))
 }
 
 // v183TestSeparator задаёт собственную служебную строку без элементов.
-func v183TestSeparator(t *testing.T, raw string, parent, depth int) model.Line {
+func v183TestSeparator(t testing.TB, raw string, parent, depth int) model.Line {
 	t.Helper()
 	return v183TestLine(t, raw, "separator", parent, depth)
 }
 
 // v183TestBlock окружает заданное тело блоком на строке 3 без смены родителей.
-func v183TestBlock(t *testing.T, name string, body ...model.Line) *model.Result {
+func v183TestBlock(t testing.TB, name string, body ...model.Line) *model.Result {
 	t.Helper()
 	lines := append([]model.Line{v183TestOpen(t, name, 2, 1)}, body...)
 	return v183TestDocument(t, append(lines, v183TestClose(t, 3, 2))...)
@@ -498,7 +632,7 @@ func v183TestBlock(t *testing.T, name string, body ...model.Line) *model.Result 
 
 // v183TestDocument добавляет обязательные версию и заголовок, а также исходные
 // ошибки для явно заданных unparsed. Родители и типы заданы тестом, не парсером.
-func v183TestDocument(t *testing.T, body ...model.Line) *model.Result {
+func v183TestDocument(t testing.TB, body ...model.Line) *model.Result {
 	t.Helper()
 	version, title := "1.2", "Lesson"
 	lines := append([]model.Line{
@@ -529,7 +663,7 @@ func v183TestDocument(t *testing.T, body ...model.Line) *model.Result {
 }
 
 // v183TestRegistry использует только полный штатный каталог.
-func v183TestRegistry(t *testing.T) *diagnostics.Registry {
+func v183TestRegistry(t testing.TB) *diagnostics.Registry {
 	t.Helper()
 	registry, err := diagnostics.NewRegistry(RegistrationCheckers())
 	if err != nil {
@@ -539,7 +673,7 @@ func v183TestRegistry(t *testing.T) *diagnostics.Registry {
 }
 
 // v183TestSnapshot сохраняет независимое представление модели для сравнения.
-func v183TestSnapshot(t *testing.T, result *model.Result) string {
+func v183TestSnapshot(t testing.TB, result *model.Result) string {
 	t.Helper()
 	encoded, err := json.Marshal(result)
 	if err != nil {

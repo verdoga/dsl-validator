@@ -145,26 +145,33 @@ func v170Labels(lower []diagnostics.Line) ([]v170Value, bool) {
 	return labels, true
 }
 
-// v170Text использует готовое content без повторного снятия экранирования.
+// v170Text соединяет готовые content без повторного снятия экранирования.
+// Между фрагментами сохраняются только однозначные ASCII-пробелы и табуляция.
 // При отсутствии content восстановление допустимо лишь для целой известной
 // текстовой области без дополнительных элементов и неразобранных частей.
 func v170Text(line diagnostics.Line, inline, separator bool) (v170Value, bool) {
 	raw := []rune(line.Raw())
 	start, end := 0, len(raw)
-	var content diagnostics.Element
+	var contents []diagnostics.Element
+	hasContent := false
 	for index := 0; index < line.ElementCount(); index++ {
 		element, _ := line.Element(index)
 		switch element.Type() {
 		case "tag":
-			if !inline || start != 0 || content != nil || strings.Trim(string(raw[:element.Start()-1]), " \t") != "" {
+			if !inline || start != 0 || len(contents) != 0 || strings.Trim(string(raw[:element.Start()-1]), " \t") != "" {
 				return v170Value{}, false
 			}
 			start = element.End() - 1
 		case "content":
-			if content != nil {
+			hasContent = true
+			text, present := element.Value()
+			if !present {
 				return v170Value{}, false
 			}
-			content = element
+			// Пустая отметка не занимает исходник и может лежать внутри фрагмента.
+			if element.Start() != element.End() || text != "" {
+				contents = append(contents, element)
+			}
 		default:
 			return v170Value{}, false
 		}
@@ -176,13 +183,23 @@ func v170Text(line diagnostics.Line, inline, separator bool) (v170Value, bool) {
 		end--
 	}
 	value := v170Value{line: line.Number(), start: start + 1, end: end + 1}
-	if content != nil {
-		if content.Start()-1 > start || content.End()-1 < end {
-			return v170Value{}, false
+	if hasContent {
+		var text strings.Builder
+		cursor := start
+		for _, content := range contents {
+			if gapEnd := min(content.Start()-1, end); gapEnd > cursor {
+				gap := string(raw[cursor:gapEnd])
+				if strings.Trim(gap, " \t") != "" {
+					return v170Value{}, false
+				}
+				text.WriteString(gap)
+			}
+			part, _ := content.Value()
+			text.WriteString(part)
+			cursor = max(cursor, content.End()-1)
 		}
-		var present bool
-		value.text, present = content.Value()
-		return value, present
+		value.text = text.String()
+		return value, cursor >= end
 	}
 	var ok bool
 	value.text, ok = v170Unescape(raw[start:end], !inline, separator)

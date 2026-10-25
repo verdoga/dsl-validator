@@ -268,6 +268,7 @@ func v147Item(line diagnostics.Line) bool {
 
 // v147BeforeSeparator проверяет число собственных разделителей всего блока.
 // ordering допускает отсутствие разделителя. Вложенные блоки не дают разделителей.
+// Raw распознаётся и при частичном разборе, как в области исключения V166.
 func v147BeforeSeparator(lines diagnostics.Lines, block diagnostics.Line, answer int, ordering bool) bool {
 	count, separator := 0, 0
 	for n := block.Number() + 1; n <= lines.Len(); n++ {
@@ -290,7 +291,7 @@ func v147BeforeSeparator(lines diagnostics.Lines, block diagnostics.Line, answer
 		if line.Type() == "block-end" {
 			break
 		}
-		if line.Type() == "separator" && strings.Trim(line.Raw(), " \t") == "---" {
+		if strings.Trim(line.Raw(), " \t") == "---" {
 			count++
 			separator = n
 		}

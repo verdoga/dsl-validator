@@ -199,6 +199,47 @@ func TestV179TextValuesAndRawRanges(t *testing.T) {
 	})
 }
 
+func TestV179ZeroLengthContentAnnotations(t *testing.T) {
+	for _, annotation := range []struct {
+		name     string
+		elements []model.Element
+	}{
+		{"before", []model.Element{v179TestElement(t, "content", "", "", 1), v179TestElement(t, "content", "Spain", "Spain", 1)}},
+		{"inside", []model.Element{v179TestElement(t, "content", "Spain", "Spain", 1), v179TestElement(t, "content", "", "", 2)}},
+		{"after", []model.Element{v179TestElement(t, "content", "Spain", "Spain", 1), v179TestElement(t, "content", "", "", 6)}},
+		{"before inside after", []model.Element{v179TestElement(t, "content", "", "", 1), v179TestElement(t, "content", "Spain", "Spain", 1), v179TestElement(t, "content", "", "", 2), v179TestElement(t, "content", "", "", 6)}},
+		{"repeated inside", []model.Element{v179TestElement(t, "content", "Spain", "Spain", 1), v179TestElement(t, "content", "", "", 2), v179TestElement(t, "content", "", "", 2), v179TestElement(t, "content", "", "", 4)}},
+		{"inside separate fragments", []model.Element{v179TestElement(t, "content", "Sp", "Sp", 1), v179TestElement(t, "content", "", "", 2), v179TestElement(t, "content", "ain", "ain", 3), v179TestElement(t, "content", "", "", 4)}},
+	} {
+		t.Run(annotation.name, func(t *testing.T) {
+			annotated := v179TestLine(t, "Spain", "content", 3, 2, annotation.elements...)
+			for _, tc := range []struct {
+				name     string
+				body     []model.Line
+				unclosed bool
+				want     []v179Want
+			}{
+				{"partial annotated owner", []model.Line{annotated, v179TestInline(t, "answer", "2", 3, 2), v179TestText(t, "Italy", "Italy", 3, 2)}, false, []v179Want{{[4]int{3, 1, 7, 2}, [][3]int{{6, 1, 6}}}}},
+				{"partial annotated missing", []model.Line{v179TestText(t, "Italy", "Italy", 3, 2), v179TestInline(t, "answer", "2", 3, 2), annotated}, false, []v179Want{{[4]int{3, 1, 7, 2}, [][3]int{{6, 1, 6}}}}},
+				{"full", []model.Line{annotated, v179TestInline(t, "answer", "2", 3, 2), v179TestText(t, "Italy", "Italy", 3, 2), v179TestInline(t, "answer", "1", 3, 2)}, false, nil},
+				{"no answers", []model.Line{annotated, v179TestText(t, "Italy", "Italy", 3, 2)}, false, nil},
+				{"partial block answer", []model.Line{annotated, v179TestOpen(t, "AnSwEr", 3, 2), v179TestText(t, "2", "2", 5, 3), v179TestClose(t, 5, 3), v179TestText(t, "Italy", "Italy", 3, 2)}, false, []v179Want{{[4]int{3, 1, 9, 2}, [][3]int{{8, 1, 6}}}}},
+				{"full with block answer", []model.Line{annotated, v179TestOpen(t, "answer", 3, 2), v179TestText(t, "2", "2", 5, 3), v179TestClose(t, 5, 3), v179TestText(t, "Italy", "Italy", 3, 2), v179TestInline(t, "answer", "1", 3, 2)}, false, nil},
+				{"unclosed partial", []model.Line{annotated, v179TestInline(t, "answer", "2", 3, 2), v179TestText(t, "Italy", "Italy", 3, 2)}, true, []v179Want{{[4]int{3, 1, 6, 6}, [][3]int{{6, 1, 6}}}}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					result := v179TestBlock(t, "ordering", tc.body...)
+					if tc.unclosed {
+						result = v179TestDocument(t, append([]model.Line{v179TestOpen(t, "ordering", 2, 1)}, tc.body...)...)
+						v179TestParserError(t, result, 3)
+					}
+					v179TestRun(t, result, tc.want)
+				})
+			}
+		})
+	}
+}
+
 func TestV179BoundariesAndUncertainty(t *testing.T) {
 	t.Run("unclosed ordering", func(t *testing.T) {
 		result := v179TestDocument(t, v179TestOpen(t, "ordering", 2, 1), v179TestText(t, "A", "A", 3, 2), v179TestInline(t, "answer", "2", 3, 2), v179TestText(t, "B", "B", 3, 2))

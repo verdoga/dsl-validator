@@ -133,7 +133,7 @@ func v197TestPair(t *testing.T, left, right func(int) []model.Line) *model.Resul
 	return v197TestBlock(t, "variants", body...)
 }
 
-func v197TestNamed(t *testing.T, tag, kind, value string, parent, depth int) model.Line {
+func v197TestNamed(t testing.TB, tag, kind, value string, parent, depth int) model.Line {
 	t.Helper()
 	return v197TestLine(t, "@"+tag+" "+value, "tag", parent, depth, v197TestElement(t, "tag", "@"+tag, strings.ToLower(tag), 1), v197TestElement(t, model.ElementType(kind), value, value, utf8.RuneCountInString(tag)+3))
 }
@@ -168,13 +168,13 @@ func v197TestMaterial(t *testing.T, tag, title string, rows ...model.Line) func(
 
 // v197TestElement сохраняет явные исходное и семантическое значения.
 // Вычисление длины используется только для входа; ожидания заданы числами.
-func v197TestElement(t *testing.T, kind model.ElementType, raw, value string, start int) model.Element {
+func v197TestElement(t testing.TB, kind model.ElementType, raw, value string, start int) model.Element {
 	t.Helper()
 	return model.Element{ElementType: kind, Raw: raw, Value: &value, Start: start, End: start + utf8.RuneCountInString(raw), ErrorIDs: []string{}}
 }
 
 // v197TestLine задаёт структуру строки без повторного разбора DSL.
-func v197TestLine(t *testing.T, raw string, kind model.LineType, parent, depth int, elements ...model.Element) model.Line {
+func v197TestLine(t testing.TB, raw string, kind model.LineType, parent, depth int, elements ...model.Element) model.Line {
 	t.Helper()
 	line := model.Line{Raw: raw, LineType: kind, NestingLevel: depth, LineEnding: "\n", Elements: append([]model.Element{}, elements...)}
 	if parent != 0 {
@@ -184,14 +184,14 @@ func v197TestLine(t *testing.T, raw string, kind model.LineType, parent, depth i
 }
 
 // v197TestOpen задаёт блочное объявление без параметров с явным родителем.
-func v197TestOpen(t *testing.T, name string, parent, depth int) model.Line {
+func v197TestOpen(t testing.TB, name string, parent, depth int) model.Line {
 	t.Helper()
 	return v197TestLine(t, "@"+name+" {", "block-start", parent, depth,
 		v197TestElement(t, "tag", "@"+name, strings.ToLower(name), 1), v197TestElement(t, "block-open", "{", "{", len(name)+3))
 }
 
 // v197TestClose задаёт закрытие указанного блока.
-func v197TestClose(t *testing.T, parent, depth int) model.Line {
+func v197TestClose(t testing.TB, parent, depth int) model.Line {
 	t.Helper()
 	return v197TestLine(t, "}", "block-end", parent, depth, v197TestElement(t, "block-close", "}", "}", 1))
 }
@@ -211,7 +211,7 @@ func v197TestBlock(t *testing.T, name string, body ...model.Line) *model.Result 
 
 // v197TestDocument добавляет обязательные версию и заголовок, а также исходные
 // ошибки для явно заданных unparsed. Родители и типы заданы тестом, не парсером.
-func v197TestDocument(t *testing.T, body ...model.Line) *model.Result {
+func v197TestDocument(t testing.TB, body ...model.Line) *model.Result {
 	t.Helper()
 	version, title := "1.2", "Lesson"
 	lines := append([]model.Line{
@@ -242,7 +242,7 @@ func v197TestDocument(t *testing.T, body ...model.Line) *model.Result {
 }
 
 // v197TestRegistry использует только полный штатный каталог.
-func v197TestRegistry(t *testing.T) *diagnostics.Registry {
+func v197TestRegistry(t testing.TB) *diagnostics.Registry {
 	t.Helper()
 	registry, err := diagnostics.NewRegistry(RegistrationCheckers())
 	if err != nil {
@@ -347,6 +347,132 @@ func TestV197GroupsAndBranches(t *testing.T) {
 		body := append(append([]model.Line{}, doc.Lines[2:]...), more...)
 		v197TestRun(t, v197TestDocument(t, body...), nil)
 	})
+}
+
+func TestV197IndexedGroupsPreserveOccurrences(t *testing.T) {
+	body := []model.Line{v197TestNamed(t, "variant", "name", "A", 3, 2)}
+	for _, value := range []string{"A.", "B.", "A.", "C."} {
+		body = append(body, v197TestNamed(t, "note", "content", value, 4, 3))
+	}
+	body = append(body, v197TestNamed(t, "variant", "name", "B", 3, 2))
+	for _, value := range []string{"B.", "A.", "B.", "C."} {
+		body = append(body, v197TestNamed(t, "note", "content", value, 9, 3))
+	}
+	body = append(body, v197TestNamed(t, "variant", "name", "C", 3, 2))
+	for _, value := range []string{"C.", "A.", "B.", "A."} {
+		body = append(body, v197TestNamed(t, "note", "content", value, 14, 3))
+	}
+	body = append(body, v197TestNamed(t, "variant", "name", "D", 3, 2))
+	for _, value := range []string{"B.", "A.", "B."} {
+		body = append(body, v197TestNamed(t, "note", "content", value, 19, 3))
+	}
+	// C присутствует в первых трёх ветвях, но отсутствует в последней.
+	// Итоговые сообщения упорядочивает Run по primary; related сохраняют исходник.
+	v197TestRun(t, v197TestBlock(t, "variants", body...), []v197Want{
+		{[4]int{10, 1, 10, 9}, [][4]int{{6, 1, 6, 9}, {12, 1, 12, 9}, {17, 1, 17, 9}, {20, 1, 20, 9}, {22, 1, 22, 9}}},
+		{[4]int{11, 1, 11, 9}, [][4]int{{5, 1, 5, 9}, {7, 1, 7, 9}, {16, 1, 16, 9}, {18, 1, 18, 9}, {21, 1, 21, 9}}},
+	})
+}
+
+func TestV197IndexedIncludesPreserveGroupOrderAndDeduplicateSpans(t *testing.T) {
+	doc := v197TestBlock(t, "variants",
+		v197TestNamed(t, "variant", "name", "A", 3, 2),
+		v197TestNamed(t, "note", "content", "A.", 4, 3),
+		v197TestNamed(t, "note", "content", "B.", 4, 3),
+		v197TestNamed(t, "note", "content", "A.", 4, 3),
+		v197TestNamed(t, "variant", "name", "B", 3, 2),
+		v197TestNamed(t, "include", "identifier", "f", 8, 3),
+		v197TestNamed(t, "note", "content", "B.", 8, 3),
+		v197TestNamed(t, "variant", "name", "C", 3, 2),
+		v197TestNamed(t, "include", "identifier", "F", 11, 3),
+		v197TestNamed(t, "note", "content", "A.", 11, 3),
+		v197TestNamed(t, "include", "identifier", "f", 11, 3))
+	doc = v197TestAppendFragment(t, doc, "f", func(p int) []model.Line {
+		return []model.Line{
+			v197TestNamed(t, "note", "content", "B.", p, 3),
+			v197TestNamed(t, "note", "content", "A.", p, 3),
+			v197TestNamed(t, "note", "content", "B.", p, 3),
+			v197TestNamed(t, "note", "content", "A.", p, 3),
+		}
+	})
+	// Обе primary совпадают. Устойчивый порядок A, B задаёт первая ветвь,
+	// хотя в содержимом include единицы идут B, A; повторы одного вызова объединены.
+	v197TestRun(t, doc, []v197Want{
+		{[4]int{9, 1, 9, 11}, [][4]int{{5, 1, 5, 9}, {7, 1, 7, 9}, {12, 1, 12, 11}, {13, 1, 13, 9}, {14, 1, 14, 11}}},
+		{[4]int{9, 1, 9, 11}, [][4]int{{6, 1, 6, 9}, {10, 1, 10, 9}, {12, 1, 12, 11}, {14, 1, 14, 11}}},
+	})
+}
+
+// v197TestGrowingBranches создаёт три ветви из отдельных корректных @note.
+// Во второй порядок обратный; последняя либо совпадает, либо содержит свои тексты.
+func v197TestGrowingBranches(t testing.TB, size int, common bool) *model.Result {
+	t.Helper()
+	body := []model.Line{v197TestOpen(t, "variants", 2, 1)}
+	for branch := 0; branch < 3; branch++ {
+		parent := len(body) + 3
+		body = append(body, v197TestNamed(t, "variant", "name", strconv.Itoa(branch+1), 3, 2))
+		for i := 0; i < size; i++ {
+			index := i
+			if branch == 1 {
+				index = size - i - 1
+			}
+			value := "Material " + strconv.Itoa(index) + "."
+			if branch == 2 && !common {
+				value = "Other " + strconv.Itoa(index) + "."
+			}
+			body = append(body, v197TestNamed(t, "note", "content", value, parent, 3))
+		}
+	}
+	return v197TestDocument(t, append(body, v197TestClose(t, 3, 2))...)
+}
+
+func TestV197GrowingBranchSets(t *testing.T) {
+	for _, size := range []int{64, 256, 1024} {
+		t.Run("missing in last/"+strconv.Itoa(size), func(t *testing.T) {
+			v197TestRun(t, v197TestGrowingBranches(t, size, false), nil)
+		})
+	}
+	t.Run("all common", func(t *testing.T) {
+		const size = 128
+		var want []v197Want
+		for i := 0; i < size; i++ {
+			index := size - i - 1
+			// @note Material N. имеет 16 постоянных колонок и цифры N.
+			end := 17 + len(strconv.Itoa(index))
+			first, second, third := 5+index, 6+size+i, 7+2*size+index
+			want = append(want, v197Want{[4]int{second, 1, second, end}, [][4]int{{first, 1, first, end}, {third, 1, third, end}}})
+		}
+		v197TestRun(t, v197TestGrowingBranches(t, size, true), want)
+	})
+}
+
+// BenchmarkV197GrowingBranchSets измеряет штатные Prepare/Run с полным каталогом.
+// В последней ветви нет общих единиц, поэтому объём вывода не скрывает группировку.
+func BenchmarkV197GrowingBranchSets(b *testing.B) {
+	for _, size := range []int{64, 256, 1024} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			original := v197TestGrowingBranches(b, size, false)
+			registry := v197TestRegistry(b)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result := *original
+				checks, err := validator.Prepare(&result, registry)
+				if err != nil {
+					b.Fatal(err)
+				}
+				result.Processing = append(append([]model.Processing{}, original.Processing...), model.Processing{ID: "benchmark", Tool: "dsl-validator"})
+				if err := validator.Run(&result, checks, "benchmark"); err != nil {
+					b.Fatal(err)
+				}
+				for _, entry := range result.Diagnostics {
+					if entry.DiagnosticCode == "V197" {
+						b.Fatal("material absent in the last branch matched")
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestV197MaterialKinds(t *testing.T) {

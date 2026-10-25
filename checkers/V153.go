@@ -21,7 +21,7 @@ func registrationV153(registry *diagnostics.Registry) error {
 
 // checkV153 проверяет исходные текстовые диапазоны без декодирования и склейки.
 // Смежные элементы могут представлять части одного ошибочного шаблона;
-// непроверяемый промежуток разделяет области, физическая строка завершает ответ.
+// служебный элемент разделяет области, физическая строка завершает ответ.
 func checkV153(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
@@ -29,7 +29,7 @@ func checkV153(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			continue
 		}
 		raw := []rune(line.Raw())
-		text := v153TextMask(line, len(raw))
+		text := v153TextMask(line, raw)
 		for start := 0; start < len(raw); {
 			if !text[start] {
 				start++
@@ -142,17 +142,35 @@ func v153TextContext(lines diagnostics.Lines, current diagnostics.Line) bool {
 
 // v153TextMask отмечает исходные позиции content, placeholder и восстановимого
 // unparsed в уже разрешённом контексте. Имена тегов и структурные скобки исключены.
-// Промежутки и служебные элементы не достраиваются по предполагаемому содержимому.
-func v153TextMask(line diagnostics.Line, length int) []bool {
-	mask := make([]bool, length)
+// Не покрытые элементами пробелы между текстовыми диапазонами сохраняют ответ;
+// служебные элементы и нетекстовые разделители остаются границами областей.
+func v153TextMask(line diagnostics.Line, raw []rune) []bool {
+	mask := make([]bool, len(raw))
 	_, nameEnd := v153Name(line)
+	previousEnd := -1
 	for i := 0; i < line.ElementCount(); i++ {
 		element, _ := line.Element(i)
 		switch element.Type() {
 		case "content", "placeholder", "unparsed":
-			for j := max(element.Start()-1, nameEnd); j < element.End()-1; j++ {
+			start, end := max(element.Start()-1, nameEnd), element.End()-1
+			if start >= end {
+				continue
+			}
+			if previousEnd >= 0 {
+				gapEnd := previousEnd
+				for gapEnd < start && unicode.IsSpace(raw[gapEnd]) {
+					gapEnd++
+				}
+				if gapEnd == start {
+					start = previousEnd
+				}
+			}
+			for j := start; j < end; j++ {
 				mask[j] = true
 			}
+			previousEnd = end
+		default:
+			previousEnd = -1
 		}
 	}
 	return mask
