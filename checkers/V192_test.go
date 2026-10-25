@@ -249,6 +249,38 @@ func TestV192KeepsCertainPreludeBeforeUnknownConstruction(t *testing.T) {
 	v192TestRun(t, result, "current", []v192Expected{{4, 1, 4, 6}})
 }
 
+func TestV192KeepsCompletedUnitsBeforeUncertainBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		tail      []model.Line
+		errorLine int
+	}{
+		{"unparsed before real branch", []model.Line{
+			v192TestInvalid(t, "@variant{", 3, 2), v192TestText(t, "Uncertain.", "Uncertain.", 3, 2),
+			v192TestTag(t, "variant", "name", "A", 3, 2), v192TestText(t, "Branch.", "Branch.", 10, 3),
+		}, 0},
+		{"missing nested closure", []model.Line{
+			v192TestOpen(t, "note", 3, 2), v192TestText(t, "Uncertain.", "Uncertain.", 8, 3),
+			v192TestTag(t, "variant", "name", "A", 8, 3), v192TestText(t, "Branch.", "Branch.", 10, 4),
+		}, 8},
+		{"ambiguous nested closure", []model.Line{
+			v192TestOpen(t, "note", 3, 2), v192TestText(t, "Uncertain.", "Uncertain.", 8, 3),
+			v192TestClose(t, 8, 3), v192TestClose(t, 8, 3),
+			v192TestTag(t, "variant", "name", "A", 3, 2), v192TestText(t, "Branch.", "Branch.", 12, 3),
+		}, 11},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := []model.Line{v192TestOpen(t, "note", 3, 2), v192TestText(t, "Read.", "Read.", 4, 3),
+				v192TestClose(t, 4, 3), v192TestText(t, "Before.", "Before.", 3, 2)}
+			result := v192TestContainer(t, append(rows, tc.tail...)...)
+			if tc.errorLine != 0 {
+				v192TestError(t, result, tc.errorLine, -1, "Границы вложенного блока не определены однозначно.")
+			}
+			v192TestRun(t, result, "current", []v192Expected{{4, 1, 6, 2}, {7, 1, 7, 8}})
+		})
+	}
+}
+
 func TestV192PhysicalPreludeSurvivesLogicalNewpage(t *testing.T) {
 	result := v192TestDocument(t, v192TestOpen(t, "variants", 2, 1),
 		v192TestText(t, "Before.", "Before.", 3, 2), v192TestTag(t, "newpage", "", "", 2, 1),
@@ -256,6 +288,19 @@ func TestV192PhysicalPreludeSurvivesLogicalNewpage(t *testing.T) {
 		v192TestText(t, "Branch.", "Branch.", 7, 3), v192TestClose(t, 3, 2))
 	v192TestError(t, result, 5, -1, "Недопустимая граница шага внутри variants.")
 	v192TestRun(t, result, "current", []v192Expected{{4, 1, 4, 8}, {6, 1, 6, 7}})
+}
+
+func TestV192PhysicalPreludeSurvivesLogicalHeading(t *testing.T) {
+	result := v192TestDocument(t, v192TestOpen(t, "variants", 2, 1),
+		v192TestText(t, "Before.", "Before.", 3, 2),
+		v192TestLine(t, "### Next", "heading", 0, 0, v192TestElement(t, "heading-level", "###", "3", 1, 4),
+			v192TestElement(t, "title", "Next", "Next", 5, 9)),
+		v192TestText(t, "After.", "After.", 5, 1), v192TestOpen(t, "note", 5, 1),
+		v192TestText(t, "Read.", "Read.", 7, 2), v192TestClose(t, 7, 2),
+		v192TestTag(t, "variant", "name", "A", 5, 1), v192TestText(t, "Branch.", "Branch.", 10, 2),
+		v192TestClose(t, 3, 2))
+	v192TestError(t, result, 5, -1, "Заголовок запрещён внутри variants.")
+	v192TestRun(t, result, "current", []v192Expected{{4, 1, 4, 8}, {6, 1, 6, 7}, {7, 1, 9, 2}})
 }
 
 func TestV192UncertainBoundaries(t *testing.T) {

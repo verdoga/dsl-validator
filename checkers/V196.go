@@ -105,7 +105,8 @@ func v196Blocks(lines diagnostics.Lines) []v196Block {
 // v196Container возвращает ближайший физически содержащий блок.
 // known=false означает отсутствие блока, литеральный контекст или неоднозначные
 // ближайшие границы. Ограниченный внутренний блок восстанавливает определимость
-// после незакрытого внешнего. V124 использует тот же контекст для newpage.
+// после незакрытых или пересечённых внешних блоков. Литеральный предок запрещает
+// такое восстановление. V124 использует тот же контекст для newpage.
 func v196Container(blocks []v196Block, number int) (nearest v196Block, known bool) {
 	for _, block := range blocks {
 		if block.open >= number {
@@ -114,13 +115,10 @@ func v196Container(blocks []v196Block, number int) (nearest v196Block, known boo
 		if block.close != 0 && block.close <= number {
 			continue
 		}
-		if block.uncertain {
-			return v196Block{}, false
-		}
 		if block.name == "editor" || block.name == "multifill" {
 			return v196Block{}, false
 		}
-		if block.close == 0 {
+		if block.uncertain || block.close == 0 {
 			nearest, known = v196Block{}, false
 			continue
 		}

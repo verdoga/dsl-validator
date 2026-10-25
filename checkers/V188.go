@@ -85,8 +85,9 @@ func v188Count(lines diagnostics.Lines, opening, closing int, ends map[int]int) 
 		name := v188Tag(line)
 		if name == "variant" {
 			count++
-		} else if name == "" && v188Element(line, "heading-level") == nil && (line.Type() == "invalid" || v188HasUnparsed(line)) {
-			// Не восстанавливаем потенциально скрытое объявление из unparsed.
+		} else if name == "" && line.Type() != "content" && v188Element(line, "heading-level") == nil && (line.Type() == "invalid" || v188HasUnparsed(line)) {
+			// В content неразобранный фрагмент относится к тексту. В прочих
+			// строках он может скрывать объявление, в том числе имя блока.
 			return 0, false
 		}
 		number = last
