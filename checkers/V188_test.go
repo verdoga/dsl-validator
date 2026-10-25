@@ -187,6 +187,15 @@ func TestV188CurlyContainersAndLiterals(t *testing.T) {
 }
 
 func TestV188KnownStructureDespiteOtherErrors(t *testing.T) {
+	t.Run("recognized content with unparsed inline syntax", func(t *testing.T) {
+		unparsed := v188TestElement(t, "unparsed", "______", "", 6, 12)
+		unparsed.Value = nil
+		content := v188TestLine(t, "Read ______", "content", 4, 3,
+			v188TestElement(t, "content", "Read ", "Read ", 1, 6), unparsed)
+		result := v188TestDocument(t, v188TestOpen(t, "variants", 2, 1),
+			v188TestTag(t, "variant", "name", "A", 3, 2), content, v188TestClose(t, 3, 2))
+		v188TestRun(t, result, "current", []v188Expected{{3, 1, 10, 1}})
+	})
 	t.Run("recognized forbidden heading", func(t *testing.T) {
 		unparsed := v188TestElement(t, "unparsed", " H", "", 2, 4)
 		unparsed.Value = nil
@@ -206,6 +215,18 @@ func TestV188KnownStructureDespiteOtherErrors(t *testing.T) {
 }
 
 func TestV188Boundaries(t *testing.T) {
+	t.Run("unparsed declaration of bounded nested block", func(t *testing.T) {
+		unparsed := v188TestElement(t, "unparsed", "@variant", "", 1, 9)
+		unparsed.Value = nil
+		// block-start и собственное закрытие сохраняют фигурные границы,
+		// но unparsed вместо tag не позволяет определить имя объявления.
+		opening := v188TestLine(t, "@variant{", "block-start", 4, 3,
+			unparsed, v188TestElement(t, "block-open", "{", "{", 9, 10))
+		result := v188TestDocument(t, v188TestOpen(t, "variants", 2, 1),
+			v188TestTag(t, "variant", "name", "A", 3, 2), opening,
+			v188TestText(t, "Read.", "Read.", 5, 4), v188TestClose(t, 5, 4), v188TestClose(t, 3, 2))
+		v188TestRun(t, result, "current", nil)
+	})
 	for _, tc := range []struct {
 		name      string
 		body      []model.Line
