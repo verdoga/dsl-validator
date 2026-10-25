@@ -243,6 +243,18 @@ func TestV196BoundedVariantsInsideUnclosedOuterBlock(t *testing.T) {
 	v196TestRun(t, result, "current", []v196Expected{{5, 1, 9, 4, 1, 10}})
 }
 
+func TestV196BoundedVariantsInsideCrossedOuterBlocks(t *testing.T) {
+	// В ошибочной модели внешний контекст не определён, но внутренний
+	// variants имеет собственные непересекающиеся границы [5,7].
+	result := v196TestDocument(t, v196TestOpen(t, "note", 2, 1), v196TestOpen(t, "hint", 3, 2),
+		v196TestOpen(t, "variants", 4, 3), v196TestTag(t, "newpage", "", "", 2, 1),
+		v196TestClose(t, 5, 4), v196TestClose(t, 3, 2), v196TestClose(t, 4, 3))
+	v196TestError(t, result, 4, -1, "Вложенный блок запрещён во внешнем контейнере.")
+	v196TestError(t, result, 5, -1, "Вложенный variants запрещён в hint.")
+	v196TestError(t, result, 8, -1, "Границы внешних блоков пересекаются.")
+	v196TestRun(t, result, "current", []v196Expected{{6, 1, 9, 5, 1, 10}})
+}
+
 func TestV196UncertainBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
