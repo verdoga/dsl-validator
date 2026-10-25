@@ -208,13 +208,13 @@ func TestV071BlocksAndIncludes(t *testing.T) {
 			v071Text(t, "Read.", "Read.", 4, 3), v071Close(t, 4, 3), v071TagLine(t, "speaking", "", "", 3, 2)),
 			"current", [][6]int{{10, 1, 10, 4, 1, 14}})
 	})
-	t.Run("nonliteral misplaced speaking is still first", func(t *testing.T) {
-		// V071 исключает структурные границы внутри контентных блоков,
-		// но не задаёт исключения для ошибочного нелитерального speaking.
+	t.Run("nested speaking does not consume first outer speaking", func(t *testing.T) {
+		// DSL 3.0.7 запрещает speaking внутри text. Первым speaking задания
+		// по 2.6.5 остаётся внешнее объявление после значимого блока text.
 		v071Run(t, v071Lesson(t, v071TagLine(t, "task", "a", "identifier", 2, 1),
 			v071Open(t, "text", 3, 2), v071Attempt(t, "@speaking", "speaking", 1, 4, 3),
 			v071Close(t, 4, 3), v071TagLine(t, "speaking", "", "", 3, 2)),
-			"current", [][6]int{{5, 1, 10, 4, 1, 8}})
+			"current", [][6]int{{7, 1, 10, 4, 1, 8}})
 	})
 	t.Run("nested variants do not change outer branch", func(t *testing.T) {
 		// Вложенный variants сохранён моделью как настоящий блок с ошибкой
@@ -230,6 +230,82 @@ func TestV071BlocksAndIncludes(t *testing.T) {
 			v071Close(t, 3, 2))
 		v071Run(t, result, "current", [][6]int{{14, 1, 10, 6, 1, 8}})
 	})
+}
+
+func TestV071NestedSpeakingPreservesOuterTask(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       []model.Line
+		v071, v072 [][6]int
+		v076       [][6]int
+	}{
+		{"no outer speaking", []model.Line{
+			v071TagLine(t, "task", "a", "identifier", 2, 1), v071Open(t, "text", 3, 2),
+			v071TagLine(t, "speaking", "", "", 4, 3), v071Text(t, "Read.", "Read.", 4, 3), v071Close(t, 4, 3),
+		}, nil, nil, [][6]int{{5, 1, 10, 4, 1, 6}}},
+		{"material before and inside block", []model.Line{
+			v071TagLine(t, "task", "a", "identifier", 2, 1), v071Text(t, "Привет 😀", "Привет 😀", 3, 2),
+			v071Open(t, "text", 3, 2), v071Text(t, "Read.", "Read.", 5, 3),
+			v071Attempt(t, " \t@SpEaKiNg extra", "speaking", 3, 5, 3),
+			v071Text(t, "Discuss.", "Discuss.", 5, 3), v071Close(t, 5, 3),
+			v071Line(t, " \t@SpEaKiNg", "tag", 3, 2, v071Element(t, "tag", "@SpEaKiNg", "speaking", 3, 12)),
+		}, [][6]int{{10, 3, 12, 4, 1, 9}}, nil, [][6]int{{7, 3, 12, 5, 1, 6}}},
+		{"recovered nested speaking before repeated outer", []model.Line{
+			v071TagLine(t, "task", "a", "identifier", 2, 1), v071Open(t, "text", 3, 2),
+			v071Invalid(t, " \t@SpEaKiNg", 4, 3), v071Text(t, "Read.", "Read.", 4, 3), v071Close(t, 4, 3),
+			v071TagLine(t, "speaking", "", "", 3, 2), v071TagLine(t, "speaking", "", "", 3, 2),
+		}, [][6]int{{8, 1, 10, 4, 1, 8}}, [][6]int{{9, 1, 10, 8, 1, 10}}, [][6]int{{5, 3, 12, 4, 1, 6}}},
+		{"nested speaking after genuine first", []model.Line{
+			v071TagLine(t, "task", "a", "identifier", 2, 1), v071TagLine(t, "speaking", "", "", 3, 2),
+			v071Open(t, "text", 3, 2), v071TagLine(t, "speaking", "", "", 5, 3), v071Close(t, 5, 3),
+			v071TagLine(t, "speaking", "", "", 3, 2),
+		}, nil, [][6]int{{8, 1, 10, 4, 1, 10}}, [][6]int{{6, 1, 10, 5, 1, 6}}},
+		{"speaking inside permitted instr hint nesting", []model.Line{
+			v071TagLine(t, "task", "a", "identifier", 2, 1), v071Open(t, "instr", 3, 2),
+			v071Text(t, "Read.", "Read.", 4, 3), v071Open(t, "hint", 4, 3),
+			v071TagLine(t, "speaking", "", "", 6, 4), v071Close(t, 6, 4), v071Close(t, 4, 3),
+			v071TagLine(t, "speaking", "", "", 3, 2),
+		}, [][6]int{{10, 1, 10, 4, 1, 9}}, nil, [][6]int{{7, 1, 10, 6, 1, 6}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := v071Lesson(t, tc.body...)
+			v071Run(t, result, "current", tc.v071)
+			v071OtherFindings(t, result, "V070", nil)
+			v071OtherFindings(t, result, "V072", tc.v072)
+			v071OtherFindings(t, result, "V076", tc.v076)
+		})
+	}
+}
+
+func TestV071NestedSpeakingInBranches(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		t.Run("shared="+strconv.FormatBool(shared), func(t *testing.T) {
+			first, second, depth := 4, 18, 3
+			if shared {
+				first, second, depth = 3, 3, 2
+			}
+			result := v071Lesson(t,
+				v071Open(t, "variants", 2, 1), v071TagLine(t, "variant", "A", "name", 3, 2),
+				v071TagLine(t, "task", "a", "identifier", first, depth), v071Open(t, "text", 5, depth+1),
+				v071Open(t, "variants", 6, depth+2), v071TagLine(t, "variant", "Inner A", "name", 7, depth+3),
+				v071TagLine(t, "task", "nested", "identifier", 8, depth+4),
+				v071TagLine(t, "speaking", "", "", 9, depth+5), v071Text(t, "Read.", "Read.", 9, depth+5),
+				v071TagLine(t, "variant", "Inner B", "name", 7, depth+3), v071TagLine(t, "speaking", "", "", 12, depth+4),
+				v071Close(t, 7, depth+3), v071Close(t, 6, depth+2),
+				v071TagLine(t, "speaking", "", "", 5, depth+1), v071TagLine(t, "speaking", "", "", 5, depth+1),
+				v071TagLine(t, "variant", "B", "name", 3, 2), v071Open(t, "text", second, depth),
+				v071TagLine(t, "speaking", "", "", 19, depth+1), v071Close(t, 19, depth+1),
+				v071TagLine(t, "speaking", "", "", second, depth), v071TagLine(t, "task", "b", "identifier", second, depth),
+				v071TagLine(t, "speaking", "", "", 23, depth+1), v071Open(t, "text", 23, depth+1),
+				v071TagLine(t, "speaking", "", "", 25, depth+2), v071Close(t, 25, depth+2),
+				v071TagLine(t, "speaking", "", "", 23, depth+1), v071Close(t, 3, 2),
+				v071TagLine(t, "speaking", "", "", 2, 1))
+			v071Run(t, result, "current", [][6]int{{16, 1, 10, 6, 1, 8}})
+			v071OtherFindings(t, result, "V070", [][6]int{{22, 1, 10, 0, 0, 0}, {30, 1, 10, 0, 0, 0}})
+			v071OtherFindings(t, result, "V072", [][6]int{{17, 1, 10, 16, 1, 10}, {28, 1, 10, 24, 1, 10}})
+			v071OtherFindings(t, result, "V076", [][6]int{{7, 1, 10, 6, 1, 6}, {20, 1, 10, 19, 1, 6}, {26, 1, 10, 25, 1, 6}})
+		})
+	}
 }
 
 func TestV071Boundaries(t *testing.T) {
@@ -639,6 +715,37 @@ func v071Run(t *testing.T, result *model.Result, source string, want [][6]int) {
 	restored.Diagnostics = restored.Diagnostics[:len(original.Diagnostics)]
 	if v071Snapshot(t, &restored) != before {
 		t.Fatal("source, metadata or previous history changed")
+	}
+}
+
+// v071OtherFindings сверяет соседние диагностики того же полного запуска.
+// Нулевая четвёртая координата означает отсутствие связанных диапазонов.
+func v071OtherFindings(t *testing.T, result *model.Result, code diagnostics.Code, want [][6]int) {
+	t.Helper()
+	var got []model.Diagnostic
+	for _, entry := range result.Diagnostics {
+		if entry.DiagnosticCode == code && entry.Source == "current" {
+			got = append(got, entry)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%s count = %d, want %d: %+v", code, len(got), len(want), got)
+	}
+	for i, position := range want {
+		location := model.Location{Start: model.Position{Line: position[0], Column: position[1]}, End: model.Position{Line: position[0], Column: position[2]}}
+		if got[i].Location == nil || *got[i].Location != location {
+			t.Fatalf("%s occurrence %d = %+v, want location %+v", code, i, got[i], location)
+		}
+		if position[3] == 0 {
+			if len(got[i].RelatedLocations) != 0 {
+				t.Fatalf("%s occurrence %d has unexpected related locations: %+v", code, i, got[i].RelatedLocations)
+			}
+			continue
+		}
+		related := model.Location{Start: model.Position{Line: position[3], Column: position[4]}, End: model.Position{Line: position[3], Column: position[5]}}
+		if len(got[i].RelatedLocations) != 1 || got[i].RelatedLocations[0] != related {
+			t.Fatalf("%s occurrence %d related = %+v, want %+v", code, i, got[i].RelatedLocations, related)
+		}
 	}
 }
 

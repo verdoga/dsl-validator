@@ -73,7 +73,9 @@ func checkV075(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
 		context := v075Context(lines, line)
-		if context.editor || context.fragment != 0 || context.multifill {
+		// Вложенные объявления не меняют структурные границы задания.
+		// Их содержимое исследуется отдельно при завершении настоящего этапа.
+		if context.content {
 			continue
 		}
 		if stream != context.variants {
@@ -83,21 +85,19 @@ func checkV075(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		}
 		name, start, _ := v075Tag(line)
 		boundary := false
-		if !context.content {
-			switch name {
-			case "task", "endtask", "header", "newpage", "variants":
-				boundary = true
-			case "variant":
-				boundary = context.variants != 0
-			}
-			if level := v075Element(line, "heading-level"); level != nil {
-				value, _ := level.Value()
-				boundary = boundary || value == "3"
-			}
-			if line.Type() == "block-end" {
-				parent, found := line.ParentLine()
-				boundary = boundary || found && parent == context.variants
-			}
+		switch name {
+		case "task", "endtask", "header", "newpage", "variants":
+			boundary = true
+		case "variant":
+			boundary = context.variants != 0
+		}
+		if level := v075Element(line, "heading-level"); level != nil {
+			value, _ := level.Value()
+			boundary = boundary || value == "3"
+		}
+		if line.Type() == "block-end" {
+			parent, found := line.ParentLine()
+			boundary = boundary || found && parent == context.variants
 		}
 		if boundary || name == "step" && active {
 			if err := finish(number-1, number); err != nil {

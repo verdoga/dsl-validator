@@ -216,6 +216,210 @@ func TestV015Placeholders(t *testing.T) {
 		[]v015Finding{{4, 7, 8, "Обнаружен U+25A1"}, {4, 15, 16, "Обнаружен U+2713"}})
 }
 
+func TestV015AdjacentAlternativeAnswers(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, value string
+		want             []v015Finding
+		punctuation      []v015Finding
+	}{
+		{"reported two alternatives", "_____{Hello!}{Goodbye!}", "", nil, nil},
+		{"three independent endings", "_____{Hi!}{Bye?}{Done.}", "", nil, nil},
+		{"second answer needs space", "_____{Hello!}{Goodbye!Again.}", "", nil,
+			[]v015Finding{{4, 22, 23, "Goodbye!Again."}}},
+		{"third answer needs space", "_____{Hello!}{Goodbye!}{Third!Again.}", "", nil,
+			[]v015Finding{{4, 30, 31, "Third!Again."}}},
+		{"outside text stays checked", "_____{Hi!}{Go!}Next,word", "", nil,
+			[]v015Finding{{4, 20, 21, "Next,word"}}},
+		{"Unicode source columns", "Я😀 _____{Hi!}{Bye!Again.}", "",
+			[]v015Finding{{4, 2, 3, "Обнаружен U+1F600"}}, []v015Finding{{4, 18, 19, "Bye!Again."}}},
+		{"each answer keeps forbidden symbols", "_____{□}{✓}{😀}", "",
+			[]v015Finding{{4, 7, 8, "Обнаружен U+25A1"}, {4, 10, 11, "Обнаружен U+2713"}, {4, 13, 14, "Обнаружен U+1F600"}}, nil},
+		{"answer syntax is not parsed twice", `_____{Hi!}{_____\{Bye\}}`, `_____{Hi!}{_____{Bye}}`,
+			[]v015Finding{{4, 12, 17, "Обнаружены U+005F, U+005F, U+005F, U+005F и U+005F"}}, nil},
+		{"paired slashes do not create inner gap", `_____{Hi!}{\\_____}`, `_____{Hi!}{\_____}`,
+			[]v015Finding{{4, 14, 19, "Обнаружены U+005F, U+005F, U+005F, U+005F и U+005F"}}, nil},
+		{"fully escaped special syntax is literal", `\_____\{Hi\}\{Bye\}`, `_____{Hi}{Bye}`,
+			[]v015Finding{{4, 2, 7, "Обнаружены U+005F, U+005F, U+005F, U+005F и U+005F"}}, nil},
+		{"escaped closing brace", `_____{Hi!}{a\}Bye!Again.}`, `_____{Hi!}{a}Bye!Again.}`, nil,
+			[]v015Finding{{4, 18, 19, `a\}Bye!Again.`}}},
+		{"escaped opening brace", `_____{Hi!}{a\{Bye!Again.}`, `_____{Hi!}{a{Bye!Again.}`, nil,
+			[]v015Finding{{4, 18, 19, `a\{Bye!Again.`}}},
+		{"paired slashes close second answer", `_____{Hi!}{a\\}{Bye!Again.}`, `_____{Hi!}{a\}{Bye!Again.}`, nil,
+			[]v015Finding{{4, 20, 21, "Bye!Again."}}},
+		{"odd slashes keep brace inside answer", `_____{Hi!}{a\\\}Bye!Again.}`, `_____{Hi!}{a\}Bye!Again.}`, nil,
+			[]v015Finding{{4, 20, 21, `a\\\}Bye!Again.`}}},
+		{"outer quote is independent of answers", "'Say _____{We're ready.}{All set!} now.'Next", "", nil,
+			[]v015Finding{{4, 39, 40, "now.'Next"}}},
+		{"literal group after gap", `_____{Hi!}\{Bye!\}`, `_____{Hi!}{Bye!}`, nil,
+			[]v015Finding{{4, 16, 17, `\{Bye!\}`}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value := tc.value
+			if value == "" {
+				value = tc.raw
+			}
+			// Контракт Value хранит строку, а не список ответов. Все альтернативы
+			// сохраняются в content; неоднозначное Value placeholder не изобретается.
+			line := v015Line(t, tc.raw, "content", 3, 2,
+				v015Element(t, "content", tc.raw, value, 1, utf8.RuneCountInString(tc.raw)+1))
+			result := v015Document(t, v015Open(t, "multifill", 2, 1), line, v015Close(t, 3, 2))
+			v015Run(t, result, "current", tc.want)
+			v015AssertPunctuation(t, result, tc.punctuation)
+			v015AssertLocations(t, result, "V049", nil)
+		})
+	}
+}
+
+func TestV015AlternativeAnswersKeepConsumerBoundaries(t *testing.T) {
+	result := v015Document(t, v015Open(t, "multifill", 2, 1),
+		v015Text(t, "_____{1-}{2}{3—4}{Word ,}{a‐b}", 3, 2), v015Close(t, 3, 2))
+	v015Run(t, result, "current", nil)
+	v015AssertPunctuation(t, result, nil)
+	v015AssertLocations(t, result, "V049", nil)
+	for _, tc := range []struct {
+		code diagnostics.Code
+		want [][4]int
+	}{
+		{"V011", [][4]int{{4, 15, 4, 16}}},
+		{"V012", [][4]int{{4, 15, 4, 16}}},
+		{"V017", [][4]int{{4, 23, 4, 24}}},
+		{"V030", [][4]int{{4, 28, 4, 29}}},
+	} {
+		v015AssertLocations(t, result, tc.code, tc.want)
+	}
+	for _, tc := range []struct {
+		name, first string
+		want        [][4]int
+	}{
+		{"all letters hidden", "_____{Hello!}{Goodbye}", nil},
+		{"all answer punctuation hidden", "Начало _____{Hello!}{Goodbye!}", [][4]int{{4, 1, 5, 6}}},
+		{"visible terminal punctuation", "Начало _____{Hello!}{Goodbye!}.", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := v015Document(t, v015Open(t, "multifill", 2, 1),
+				v015Text(t, tc.first, 3, 2), v015Text(t, "далее", 3, 2), v015Close(t, 3, 2))
+			v015Run(t, result, "current", nil)
+			v015AssertPunctuation(t, result, nil)
+			v015AssertLocations(t, result, "V021", tc.want)
+			v015AssertLocations(t, result, "V049", nil)
+		})
+	}
+}
+
+func TestV015AlternativeAnswerSourceBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		body        []model.Line
+		punctuation []v015Finding
+		closing     [][4]int
+	}{
+		{"space breaks adjacency", []model.Line{v015Text(t, "_____{Hi!} {Bye!}", 3, 2)},
+			[]v015Finding{{4, 16, 17, "{Bye!}"}}, [][4]int{{4, 17, 4, 18}}},
+		{"line breaks adjacency", []model.Line{v015Text(t, "_____{Hi!}", 3, 2), v015Text(t, "{Bye!}", 3, 2)},
+			[]v015Finding{{5, 5, 6, "{Bye!}"}}, [][4]int{{5, 6, 5, 7}}},
+		{"extra closing after alternatives", []model.Line{v015Text(t, "_____{Hi!}{Bye!}}", 3, 2)},
+			nil, [][4]int{{4, 17, 4, 18}}},
+		{"literal content after recognized placeholder", []model.Line{
+			v015Line(t, `_____{Hi!}\{Bye!\}`, "content", 3, 2,
+				v015Element(t, "placeholder", "_____{Hi!}", "Hi!", 1, 11),
+				v015Element(t, "content", `\{Bye!\}`, "{Bye!}", 11, 19))},
+			[]v015Finding{{4, 16, 17, `\{Bye!\}`}}, nil},
+		{"outer quote across content and placeholder", []model.Line{
+			v015Line(t, "'Say _____{We're ready.}{All set!} _____{OK.} now.'", "content", 3, 2,
+				v015Element(t, "content", "'Say _____{We're ready.}{All set!}", "'Say _____{We're ready.}{All set!}", 1, 35),
+				v015Element(t, "placeholder", "_____{OK.}", "OK.", 36, 46),
+				v015Element(t, "content", "now.'", "now.'", 47, 52))}, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := append([]model.Line{v015Open(t, "multifill", 2, 1)}, tc.body...)
+			body = append(body, v015Close(t, 3, 2))
+			result := v015Document(t, body...)
+			v015Run(t, result, "current", nil)
+			v015AssertPunctuation(t, result, tc.punctuation)
+			v015AssertLocations(t, result, "V049", tc.closing)
+		})
+	}
+}
+
+func TestV015MalformedAlternativeKeepsTextChecks(t *testing.T) {
+	const underscores = "Обнаружены U+005F, U+005F, U+005F, U+005F и U+005F"
+	for _, tc := range []struct {
+		name, raw   string
+		forbidden   int
+		punctuation []v015Finding
+		closing     [][4]int
+	}{
+		{"empty group and independent next gap", "_____{A}{}{□!Again.} _____{B!}{C!}", 12,
+			[]v015Finding{{4, 13, 14, "_____{A}{}{□!Again.}"}, {4, 19, 20, "_____{A}{}{□!Again.}"}}, nil},
+		{"whitespace group", "_____{A}{   }{□!Again.}", 15,
+			[]v015Finding{{4, 16, 17, "_____{A}{   }{□!Again.}"}, {4, 22, 23, "_____{A}{   }{□!Again.}"}}, nil},
+		{"nested brace in later group", "_____{A}{bad{□!Again.}}", 14,
+			[]v015Finding{{4, 15, 16, "_____{A}{bad{□!Again.}}"}, {4, 21, 22, "_____{A}{bad{□!Again.}}"}}, [][4]int{{4, 23, 4, 24}}},
+		{"unclosed later group", "_____{A}{□!Again.", 10,
+			[]v015Finding{{4, 11, 12, "_____{A}{□!Again."}}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := v015Document(t, v015Open(t, "multifill", 2, 1),
+				v015Text(t, tc.raw, 3, 2), v015Close(t, 3, 2))
+			v015Run(t, result, "current", []v015Finding{{4, 1, 6, underscores},
+				{4, tc.forbidden, tc.forbidden + 1, "Обнаружен U+25A1"}})
+			v015AssertPunctuation(t, result, tc.punctuation)
+			v015AssertLocations(t, result, "V049", tc.closing)
+		})
+	}
+}
+
+// v015AssertPunctuation проверяет V018 того же полного запуска, включая
+// контекст: пример не должен захватывать скобки или соседнюю альтернативу.
+func v015AssertPunctuation(t *testing.T, result *model.Result, want []v015Finding) {
+	t.Helper()
+	var locations [][4]int
+	for _, expected := range want {
+		locations = append(locations, [4]int{expected.line, expected.start, expected.line, expected.end})
+	}
+	v015AssertLocations(t, result, "V018", locations)
+	index := 0
+	for _, entry := range result.Diagnostics {
+		if entry.DiagnosticCode != "V018" || entry.Source != "current" {
+			continue
+		}
+		message := "После знака препинания отсутствует пробел.\nконкретизация: Обратите внимание на знак препинания: «" + want[index].detail + "»"
+		if entry.Message != message || entry.SeverityLevel != "warning" || entry.DiagnosticScope != "line" || entry.Fatal {
+			t.Errorf("V018 occurrence %d = %+v, want message %q", index, entry, message)
+		}
+		index++
+	}
+}
+
+// v015AssertLocations сверяет потребителя общих границ в уже выполненном
+// штатном запуске; ожидаемые координаты заданы независимо от реализации.
+func v015AssertLocations(t *testing.T, result *model.Result, code diagnostics.Code, want [][4]int) {
+	t.Helper()
+	var got []model.Diagnostic
+	for _, entry := range result.Diagnostics {
+		if entry.DiagnosticCode == code && entry.Source == "current" {
+			got = append(got, entry)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%s count = %d, want %d; diagnostics: %+v", code, len(got), len(want), got)
+	}
+	for i, expected := range want {
+		location := model.Location{Start: model.Position{Line: expected[0], Column: expected[1]},
+			End: model.Position{Line: expected[2], Column: expected[3]}}
+		if got[i].Location == nil || *got[i].Location != location {
+			t.Errorf("%s occurrence %d location = %+v, want %+v", code, i, got[i].Location, location)
+		}
+		if got[i].RelatedLocations == nil || len(got[i].RelatedLocations) != 0 || got[i].Fatal {
+			t.Errorf("%s occurrence %d has unexpected metadata: %+v", code, i, got[i])
+		}
+		if code == "V049" && (got[i].SeverityLevel != "error" || got[i].DiagnosticScope != "line" ||
+			got[i].Message != "Неэкранированная закрывающая фигурная скобка находится в строке с другим содержимым.\nконкретизация: Граница блока записывается отдельной строкой; для буквального символа используйте \\}") {
+			t.Errorf("V049 occurrence %d has unexpected metadata: %+v", i, got[i])
+		}
+	}
+}
+
 func TestV015MalformedAnswerKeepsTextChecks(t *testing.T) {
 	// Полный каталог также выдаёт V005 на незакрытую фигурную скобку.
 	// Проверка целостности в v015Run контролирует её флаги и обратные ссылки;

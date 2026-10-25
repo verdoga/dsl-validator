@@ -39,13 +39,13 @@ func checkV015(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			excluded := make([]bool, end-start)
 			if element.Type() == "placeholder" || element.Type() == "content" && plain {
 				for _, gap := range v015Placeholders(raw, start, end, answers || element.Type() == "placeholder") {
-					prefixEnd := gap.end
-					if gap.answerStart >= 0 {
-						prefixEnd = gap.answerStart
-						excluded[gap.end-1-start] = true
-					}
-					for i := gap.start; i < prefixEnd; i++ {
+					for i := gap.start; i < gap.end; i++ {
 						excluded[i-start] = true
+					}
+					for _, answer := range gap.answers {
+						for i := answer.start; i < answer.end; i++ {
+							excluded[i-start] = false
+						}
 					}
 				}
 			}
@@ -68,10 +68,12 @@ func checkV015(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	return nil
 }
 
-// v015Placeholder задаёт индексы рун [start,end) в Raw строки.
-// answerStart равен -1 для обычного пропуска; иначе ответ занимает [answerStart,end-1).
+// v015Placeholder задаёт индексы рун [start,end) одного пропуска в Raw строки.
+// answers содержит самостоятельные ответы без скобок; у обычного пропуска пуст.
+// Все соседние альтернативы входят в общий диапазон, используемый V018 и V021.
 type v015Placeholder struct {
-	start, end, answerStart int
+	start, end int
+	answers    []v015TextPart
 }
 
 // v015TextPart задаёт самостоятельный участок [start,end) в исходных рунах.
@@ -93,13 +95,13 @@ func v015TextParts(raw []rune, element diagnostics.Element, answers bool) []v015
 	}
 	var parts []v015TextPart
 	for _, gap := range v015Placeholders(raw, start, end, true) {
-		if gap.answerStart < 0 {
+		if len(gap.answers) == 0 {
 			continue
 		}
 		if !placeholder && start < gap.start {
 			parts = append(parts, v015TextPart{start: start, end: gap.start})
 		}
-		parts = append(parts, v015TextPart{start: gap.answerStart, end: gap.end - 1, answer: true})
+		parts = append(parts, gap.answers...)
 		start = gap.end
 	}
 	if !placeholder && start < end {
@@ -151,6 +153,7 @@ func v015Tag(line diagnostics.Line) string {
 // v015Placeholders распознаёт пропуски в [start,end), не меняя Raw и не выдавая
 // ошибок разметки. Ответы не разбираются повторно как плейсхолдеры. Функция также
 // задаёт границы ответов для V018 независимо от регистрации или запуска V015.
+// Ошибочная или пустая группа оставляет всю специальную запись обычным текстом.
 func v015Placeholders(raw []rune, start, end int, answers bool) []v015Placeholder {
 	var gaps []v015Placeholder
 	for i := start; i < end; {
@@ -166,10 +169,12 @@ func v015Placeholders(raw []rune, start, end int, answers bool) []v015Placeholde
 			i < len(raw) && raw[i] == '_' || v015Escaped(raw, first) {
 			continue
 		}
-		gap := v015Placeholder{start: first, end: i, answerStart: -1}
-		if i < end && raw[i] == '{' {
+		gap := v015Placeholder{start: first, end: i}
+		valid := true
+		for i < end && raw[i] == '{' {
 			answerStart := i + 1
-			valid, nonempty := answers, false
+			valid = valid && answers
+			nonempty := false
 			i++
 			for i < end && raw[i] != '}' {
 				if raw[i] == '{' {
@@ -184,13 +189,16 @@ func v015Placeholders(raw []rune, start, end int, answers bool) []v015Placeholde
 				i++
 			}
 			if i == end {
-				continue
+				valid = false
+				break
 			}
 			i++ // Закрывающая скобка; экранированные скобки уже потреблены парами.
-			if !valid || !nonempty {
-				continue
-			}
-			gap.end, gap.answerStart = i, answerStart
+			valid = valid && nonempty
+			gap.answers = append(gap.answers, v015TextPart{start: answerStart, end: i - 1, answer: true})
+			gap.end = i
+		}
+		if !valid {
+			continue
 		}
 		gaps = append(gaps, gap)
 	}

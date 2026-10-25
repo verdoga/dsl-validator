@@ -21,7 +21,7 @@ func registrationV071(registry *diagnostics.Registry) error {
 }
 
 // checkV071 хранит первое препятствие и факт первого speaking только в текущем
-// задании. Границы внутри контентных блоков не меняют состояние задания.
+// задании. Объявления внутри контентных блоков не меняют состояние задания.
 func checkV071(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	active, spoken := false, false
 	stream, obstacle := 0, 0
@@ -60,7 +60,7 @@ func checkV071(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if !active || spoken {
 			continue
 		}
-		if name == "speaking" {
+		if name == "speaking" && !context.content {
 			spoken = true
 			if obstacle != 0 {
 				occurrence, err := findings.Add(number, start, number, end, "")

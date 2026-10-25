@@ -172,6 +172,179 @@ func TestV075EveryTaskBoundary(t *testing.T) {
 	}
 }
 
+func TestV075NestedStepDoesNotChangeStage(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		body      []model.Line
+		want      [][8]int
+		count     string
+		forbidden [8]int
+	}{
+		{"nested step cannot start the first stage", []model.Line{
+			v075TagLine(t, "task", "a", "identifier", 2, 1), v075Open(t, "text", 3, 2),
+			v075TagLine(t, "step", "Fake", "title", 4, 3), v075Close(t, 4, 3),
+			v075TagLine(t, "endtask", "", "", 2, 1),
+		}, nil, "Найдено этапов: 0.", [8]int{5, 1, 5, 6, 4, 1, 4, 6}},
+		{"empty outer stage retains its full range", []model.Line{
+			v075TagLine(t, "task", "a", "identifier", 2, 1), v075TagLine(t, "step", "Real", "title", 3, 2),
+			v075Open(t, "text", 4, 3), v075TagLine(t, "step", "Fake", "title", 5, 4), v075Close(t, 5, 4),
+			v075TagLine(t, "endtask", "", "", 2, 1),
+		}, [][8]int{{4, 1, 7, 2, 8, 1, 8, 9}}, "Найдено этапов: 1.", [8]int{6, 1, 6, 6, 5, 1, 5, 6}},
+		{"material before nested step stays in the outer stage", []model.Line{
+			v075TagLine(t, "task", "a", "identifier", 2, 1), v075TagLine(t, "step", "Real", "title", 3, 2),
+			v075Open(t, "text", 4, 3), v075Text(t, "Visible material.", "Visible material.", 5, 4),
+			v075TagLine(t, "step", "Fake", "title", 5, 4), v075Close(t, 5, 4),
+			v075TagLine(t, "endtask", "", "", 2, 1),
+		}, nil, "Найдено этапов: 1.", [8]int{7, 1, 7, 6, 5, 1, 5, 6}},
+		{"material after nested step stays in the outer stage", []model.Line{
+			v075TagLine(t, "task", "a", "identifier", 2, 1), v075TagLine(t, "step", "Real", "title", 3, 2),
+			v075Open(t, "text", 4, 3), v075TagLine(t, "step", "Fake", "title", 5, 4),
+			v075Text(t, "Visible material.", "Visible material.", 5, 4), v075Close(t, 5, 4),
+			v075TagLine(t, "endtask", "", "", 2, 1),
+		}, nil, "Найдено этапов: 1.", [8]int{6, 1, 6, 6, 5, 1, 5, 6}},
+		{"material before the block stays in the outer stage", []model.Line{
+			v075TagLine(t, "task", "a", "identifier", 2, 1), v075TagLine(t, "step", "Real", "title", 3, 2),
+			v075Text(t, "Read.", "Read.", 4, 3), v075Open(t, "text", 4, 3),
+			v075TagLine(t, "step", "Fake", "title", 6, 4), v075Close(t, 6, 4),
+			v075TagLine(t, "endtask", "", "", 2, 1),
+		}, nil, "Найдено этапов: 1.", [8]int{7, 1, 7, 6, 6, 1, 6, 6}},
+		{"material after the block stays in the outer stage", []model.Line{
+			v075TagLine(t, "task", "a", "identifier", 2, 1), v075TagLine(t, "step", "Real", "title", 3, 2),
+			v075Open(t, "text", 4, 3), v075TagLine(t, "step", "Fake", "title", 5, 4), v075Close(t, 5, 4),
+			v075Text(t, "Read.", "Read.", 4, 3), v075TagLine(t, "endtask", "", "", 2, 1),
+		}, nil, "Найдено этапов: 1.", [8]int{6, 1, 6, 6, 5, 1, 5, 6}},
+		{"next real stage still closes an empty stage", []model.Line{
+			v075TagLine(t, "task", "a", "identifier", 2, 1), v075TagLine(t, "step", "Real", "title", 3, 2),
+			v075Open(t, "text", 4, 3), v075TagLine(t, "step", "Fake", "title", 5, 4), v075Close(t, 5, 4),
+			v075TagLine(t, "step", "Next", "title", 3, 2), v075TagLine(t, "endtask", "", "", 2, 1),
+		}, [][8]int{{4, 1, 7, 2, 8, 1, 8, 11}, {8, 1, 8, 11, 9, 1, 9, 9}}, "", [8]int{6, 1, 6, 6, 5, 1, 5, 6}},
+		{"empty neighbours of a filled real stage are still checked", []model.Line{
+			v075TagLine(t, "task", "a", "identifier", 2, 1), v075TagLine(t, "step", "Before", "title", 3, 2),
+			v075TagLine(t, "step", "Real", "title", 3, 2), v075Open(t, "text", 5, 3),
+			v075Text(t, "Read.", "Read.", 6, 4), v075TagLine(t, "step", "Fake", "title", 6, 4), v075Close(t, 6, 4),
+			v075TagLine(t, "step", "After", "title", 3, 2), v075TagLine(t, "endtask", "", "", 2, 1),
+		}, [][8]int{{4, 1, 4, 13, 5, 1, 5, 11}, {10, 1, 10, 12, 11, 1, 11, 9}}, "", [8]int{8, 1, 8, 6, 6, 1, 6, 6}},
+		{"recovered nested step is also excluded", []model.Line{
+			v075TagLine(t, "task", "a", "identifier", 2, 1), v075TagLine(t, "step", "Real", "title", 3, 2),
+			v075Open(t, "text", 4, 3), v075Invalid(t, "\t@StEp Fake", 5, 4), v075Close(t, 5, 4),
+			v075TagLine(t, "endtask", "", "", 2, 1),
+		}, [][8]int{{4, 1, 7, 2, 8, 1, 8, 9}}, "Найдено этапов: 1.", [8]int{6, 2, 6, 7, 5, 1, 5, 6}},
+		{"partially parsed nested step cannot replace the stage at EOF", []model.Line{
+			v075TagLine(t, "task", "a", "identifier", 2, 1), v075TagLine(t, "step", "Real", "title", 3, 2),
+			v075Open(t, "text", 4, 3), v075Attempt(t, "@step Fake", "step", 1, 5, 4), v075Close(t, 5, 4),
+		}, [][8]int{{4, 1, 7, 2}}, "Найдено этапов: 1.", [8]int{6, 1, 6, 6, 5, 1, 5, 6}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := v075Lesson(t, tc.body...)
+			v075Run(t, result, "current", tc.want)
+			var counts []v075ContextFinding
+			if tc.count != "" {
+				counts = append(counts, v075ContextFinding{[8]int{3, 1, 3, 6}, tc.count})
+			}
+			v075CheckContext(t, result, "V068", counts)
+			v075CheckContext(t, result, "V076", []v075ContextFinding{
+				{tc.forbidden, "Вложенный тег: @step. Родительский блок: @text."},
+			})
+		})
+	}
+}
+
+func TestV075NestedStepsInBranches(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		t.Run("shared="+strconv.FormatBool(shared), func(t *testing.T) {
+			first, second, depth := 4, 13, 3
+			if shared {
+				first, second, depth = 3, 3, 2
+			}
+			result := v075Lesson(t, v075Open(t, "variants", 2, 1), v075TagLine(t, "variant", "A", "name", 3, 2),
+				v075TagLine(t, "task", "a", "identifier", first, depth), v075TagLine(t, "step", "Real", "title", 5, depth+1),
+				v075Open(t, "instr", 6, depth+2), v075Open(t, "hint", 7, depth+3),
+				v075Attempt(t, "@step Fake", "step", 1, 8, depth+4), v075Close(t, 8, depth+4), v075Close(t, 7, depth+3),
+				v075TagLine(t, "step", "Next", "title", 5, depth+1), v075TagLine(t, "variant", "B", "name", 3, 2),
+				v075TagLine(t, "task", "b", "identifier", second, depth), v075TagLine(t, "step", "Other", "title", 14, depth+1),
+				v075Close(t, 3, 2))
+			v075Run(t, result, "current", [][8]int{
+				{6, 1, 11, 2, 12, 1, 12, 11}, {12, 1, 12, 11, 13, 1, 13, 11}, {15, 1, 15, 12, 16, 1, 16, 2},
+			})
+			v075CheckContext(t, result, "V068", []v075ContextFinding{{[8]int{14, 1, 14, 6}, "Найдено этапов: 1."}})
+			v075CheckContext(t, result, "V076", []v075ContextFinding{
+				{[8]int{9, 1, 9, 6, 8, 1, 8, 6}, "Вложенный тег: @step. Родительский блок: @hint."},
+			})
+		})
+	}
+}
+
+func TestV075NestedStepsInOtherBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		body      []model.Line
+		want      [][8]int
+		forbidden []v075ContextFinding
+	}{
+		{"example block cannot contain a structural step", []model.Line{
+			v075Open(t, "example", 4, 3), v075Attempt(t, "@step Fake", "step", 1, 5, 4), v075Close(t, 5, 4),
+		}, [][8]int{{4, 1, 7, 2, 8, 1, 8, 9}}, []v075ContextFinding{
+			{[8]int{6, 1, 6, 6, 5, 1, 5, 9}, "Вложенный тег: @step. Родительский блок: @example."},
+		}},
+		{"interactive block cannot contain a structural step", []model.Line{
+			v075Open(t, "choice", 4, 3), v075Attempt(t, "@step Fake", "step", 1, 5, 4), v075Close(t, 5, 4),
+		}, [][8]int{{4, 1, 7, 2, 8, 1, 8, 9}}, nil},
+		{"unknown block cannot replace a filled outer stage", []model.Line{
+			v075Text(t, "Read.", "Read.", 4, 3),
+			v075Line(t, "@unknown {", "block-start", 4, 3,
+				v075ModelElement(t, "unparsed", "@unknown", "", 1, 9), v075ModelElement(t, "block-open", "{", "{", 10, 11)),
+			v075Attempt(t, "@step Fake", "step", 1, 6, 4), v075Close(t, 6, 4),
+		}, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := append([]model.Line{v075TagLine(t, "task", "a", "identifier", 2, 1),
+				v075TagLine(t, "step", "Real", "title", 3, 2)}, tc.body...)
+			body = append(body, v075TagLine(t, "endtask", "", "", 2, 1))
+			result := v075Lesson(t, body...)
+			v075Run(t, result, "current", tc.want)
+			v075CheckContext(t, result, "V068", []v075ContextFinding{{[8]int{3, 1, 3, 6}, "Найдено этапов: 1."}})
+			v075CheckContext(t, result, "V076", tc.forbidden)
+		})
+	}
+}
+
+// v075ContextFinding задаёт независимые диапазоны и конкретизацию соседней проверки.
+type v075ContextFinding struct {
+	position [8]int
+	detail   string
+}
+
+// v075CheckContext сверяет V068/V076 того же полного запуска с ожиданиями теста.
+func v075CheckContext(t *testing.T, result *model.Result, code diagnostics.Code, want []v075ContextFinding) {
+	t.Helper()
+	var got []model.Diagnostic
+	for _, entry := range result.Diagnostics {
+		if entry.Source == "current" && entry.DiagnosticCode == code {
+			got = append(got, entry)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%s count = %d, want %d: %+v", code, len(got), len(want), got)
+	}
+	message := "В задании меньше двух внутренних этапов @step.\nконкретизация: "
+	if code == "V076" {
+		message = "Вложенный тег запрещён в этом блоке.\nконкретизация: "
+	}
+	for i, expected := range want {
+		entry, p := got[i], expected.position
+		location := model.Location{Start: model.Position{Line: p[0], Column: p[1]}, End: model.Position{Line: p[2], Column: p[3]}}
+		var related []model.Location
+		if p[4] != 0 {
+			related = append(related, model.Location{Start: model.Position{Line: p[4], Column: p[5]}, End: model.Position{Line: p[6], Column: p[7]}})
+		}
+		if entry.Location == nil || *entry.Location != location || entry.RelatedLocations == nil || len(entry.RelatedLocations) != len(related) ||
+			len(related) == 1 && entry.RelatedLocations[0] != related[0] || entry.ID == "" || entry.SeverityLevel != "error" ||
+			entry.DiagnosticScope != "line" || entry.Fatal || entry.Message != message+expected.detail {
+			t.Fatalf("%s occurrence %d = %+v; want %+v, related %+v and exact metadata", code, i, entry, location, related)
+		}
+	}
+}
+
 func TestV075ContentTags(t *testing.T) {
 	for _, tc := range []struct {
 		name string
