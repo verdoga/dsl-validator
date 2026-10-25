@@ -76,7 +76,12 @@ func TestV012SignsBetweenDigits(t *testing.T) {
 		{"HTML entity is not decoded", "1&#45;2", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			v012Run(t, v012Document(t, v012Text(t, tc.raw, tc.raw, 2, 1)), "current", tc.want, 1)
+			var wantErrors []v012ErrorExpectation
+			if tc.name == "alphanumeric uppercase" || tc.name == "alphanumeric lowercase" {
+				// V012 по-прежнему отмечает только дефис; одиночный _ даёт V148.
+				wantErrors = []v012ErrorExpectation{{"V148", [3]int{3, 6, 7}}}
+			}
+			v012Run(t, v012Document(t, v012Text(t, tc.raw, tc.raw, 2, 1)), "current", tc.want, 1, wantErrors...)
 		})
 	}
 }
@@ -457,7 +462,7 @@ func v012Run(t *testing.T, result *model.Result, processingID string, want [][3]
 				t.Errorf("unexpected accompanying V037: %+v", entry)
 			}
 		}
-		if (entry.DiagnosticCode == "V111" || entry.DiagnosticCode == "V112" || entry.DiagnosticCode == "V114" || entry.DiagnosticCode == "V115") && entry.Source == processingID {
+		if (entry.DiagnosticCode == "V111" || entry.DiagnosticCode == "V112" || entry.DiagnosticCode == "V114" || entry.DiagnosticCode == "V115" || entry.DiagnosticCode == "V148") && entry.Source == processingID {
 			gotErrors = append(gotErrors, entry)
 		}
 		if entry.DiagnosticCode == "V012" && entry.Source == processingID {
@@ -486,13 +491,14 @@ func v012Run(t *testing.T, result *model.Result, processingID string, want [][3]
 		}
 	}
 	if len(gotErrors) != len(wantErrors) {
-		t.Fatalf("current V111/V112/V114/V115 count = %d, want %d; diagnostics: %+v", len(gotErrors), len(wantErrors), gotErrors)
+		t.Fatalf("current V111/V112/V114/V115/V148 count = %d, want %d; diagnostics: %+v", len(gotErrors), len(wantErrors), gotErrors)
 	}
 	messages := map[diagnostics.Code]string{
 		"V111": "Команда пустой строки отличается от отдельной записи <br>.\nконкретизация: другое содержимое строки",
 		"V112": "Тег выделения не имеет пары в своей строке.\nконкретизация: Открытие и закрытие выделения должны находиться в одной текстовой строке",
 		"V114": "В теге выделения записаны атрибуты.",
 		"V115": "Использован неподдерживаемый HTML-тег.",
+		"V148": "Подчёркивания не образуют допустимый пропуск.\nконкретизация: Длина последовательности: 1; требуется 5.",
 	}
 	wantLineErrors := append([]bool{}, oldLineErrors...)
 	for i, expected := range wantErrors {
