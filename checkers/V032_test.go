@@ -80,13 +80,8 @@ func TestV032TaskArguments(t *testing.T) {
 			result := v032Document(t,
 				v032Line(t, tc.raw, "tag", 2, 1, v032Element(t, "tag", tagRaw, "task", tagStart), argument),
 				v032Text(t, "Read.", 3, 2))
-			// Во всех этих заданиях ноль этапов. Корректный ID не отменяет
-			// дополнительное требование V068; её диапазон задан отдельно.
-			wantV068 := v032Expected{3, 1, 6, "Найдено этапов: 0."}
-			if tc.name == "indented declaration" {
-				wantV068 = v032Expected{3, 3, 8, "Найдено этапов: 0."}
-			}
-			v032Run(t, result, "current", tc.want, 1, wantV068)
+			// Задания без @step не включают проверку минимума этапов V068.
+			v032Run(t, result, "current", tc.want, 1)
 		})
 	}
 }
@@ -142,8 +137,7 @@ func TestV032RawArgumentAndRecovery(t *testing.T) {
 	t.Run("identifier with unparsed remainder", func(t *testing.T) {
 		result := v032Document(t,
 			v032Line(t, "@task good bad/id", "tag", 2, 1, v032Element(t, "tag", "@task", "task", 1), v032Element(t, "identifier", "good", "good", 7), v032Unparsed(t, "bad/id", 12)), v032Text(t, "Read.", 3, 2))
-		v032Run(t, result, "current", []v032Expected{{3, 7, 18, `Недопустимые символы: " " (U+0020), "/" (U+002F).`}}, 1,
-			v032Expected{3, 1, 6, "Найдено этапов: 0."})
+		v032Run(t, result, "current", []v032Expected{{3, 7, 18, `Недопустимые символы: " " (U+0020), "/" (U+002F).`}}, 1)
 	})
 	t.Run("recognized fragment brace", func(t *testing.T) {
 		result := v032Document(t,
@@ -171,7 +165,7 @@ func TestV032RawArgumentAndRecovery(t *testing.T) {
 			// Отсутствующий обязательный ID — отдельная ошибка парсера, вне V032.
 			result.Diagnostics = append(result.Diagnostics, model.Diagnostic{ID: "missing-id", Source: "parser", DiagnosticCode: "fixture-missing-id", SeverityLevel: "error", DiagnosticScope: "line", Message: "Отсутствует обязательный ID.", Location: &model.Location{Start: model.Position{Line: 3, Column: 1}, End: model.Position{Line: 3, Column: 6}}, RelatedLocations: []model.Location{}})
 			result.Document.HasErrors, result.Lines[2].HasErrors = true, true
-			v032Run(t, result, "current", nil, 1, v032Expected{3, 1, 6, "Найдено этапов: 0."})
+			v032Run(t, result, "current", nil, 1)
 		})
 	}
 }
@@ -203,10 +197,7 @@ func TestV032NestedAndMultipleTasks(t *testing.T) {
 		v032Line(t, "@task good", "tag", 7, 3, v032Element(t, "tag", "@task", "task", 1), v032Element(t, "identifier", "good", "good", 7)), v032Text(t, "Read again.", 8, 4),
 		v032Line(t, "}", "block-end", 3, 2, v032Element(t, "block-close", "}", "}", 1)),
 		v032Line(t, "@task c?d", "tag", 2, 1, v032Element(t, "tag", "@task", "task", 1), v032Unparsed(t, "c?d", 7)), v032Text(t, "Read.", 11, 2))
-	v032Run(t, result, "current", []v032Expected{{5, 7, 10, `Недопустимые символы: "/" (U+002F).`}, {11, 7, 10, `Недопустимые символы: "?" (U+003F).`}}, 1,
-		v032Expected{5, 1, 6, "Найдено этапов: 0."},
-		v032Expected{8, 1, 6, "Найдено этапов: 0."},
-		v032Expected{11, 1, 6, "Найдено этапов: 0."})
+	v032Run(t, result, "current", []v032Expected{{5, 7, 10, `Недопустимые символы: "/" (U+002F).`}, {11, 7, 10, `Недопустимые символы: "?" (U+003F).`}}, 1)
 }
 
 func TestV032VersionsEndingsAndHistory(t *testing.T) {
@@ -234,8 +225,7 @@ func TestV032VersionsEndingsAndHistory(t *testing.T) {
 					result.Lines[i].LineEnding = ending
 				}
 			}
-			v032Run(t, result, "current", []v032Expected{{3, 7, 13, `Недопустимые символы: "/" (U+002F).`}}, 1,
-				v032Expected{3, 1, 6, "Найдено этапов: 0."})
+			v032Run(t, result, "current", []v032Expected{{3, 7, 13, `Недопустимые символы: "/" (U+002F).`}}, 1)
 		})
 	}
 	// Модель допускает распознанный identifier с исходным значением без
@@ -243,7 +233,7 @@ func TestV032VersionsEndingsAndHistory(t *testing.T) {
 	// Это позволяет проверить установку новых флагов error, а не только их сохранение.
 	result := v032Document(t, v032Line(t, "@task  a/b", "tag", 2, 1, v032Element(t, "tag", "@task", "task", 1), v032Element(t, "identifier", "a/b", "a/b", 8)), v032Text(t, "Read.", 3, 2))
 	want := []v032Expected{{3, 8, 11, `Недопустимые символы: "/" (U+002F).`}}
-	v032Run(t, result, "first", want, 1, v032Expected{3, 1, 6, "Найдено этапов: 0."})
+	v032Run(t, result, "first", want, 1)
 	count := 0
 	for _, d := range result.Diagnostics {
 		if d.Source == "first" && d.DiagnosticCode == "V001" {
@@ -253,9 +243,8 @@ func TestV032VersionsEndingsAndHistory(t *testing.T) {
 	if count != 1 {
 		t.Errorf("V001 count = %d, want 1", count)
 	}
-	v032Run(t, result, "second", want, 1, v032Expected{3, 1, 6, "Найдено этапов: 0."})
-	v032Run(t, v032Document(t, v032Line(t, "@task Good", "tag", 2, 1, v032Element(t, "tag", "@task", "task", 1), v032Element(t, "identifier", "Good", "Good", 7)), v032Text(t, "Read.", 3, 2)), "first", nil, 1,
-		v032Expected{3, 1, 6, "Найдено этапов: 0."})
+	v032Run(t, result, "second", want, 1)
+	v032Run(t, v032Document(t, v032Line(t, "@task Good", "tag", 2, 1, v032Element(t, "tag", "@task", "task", 1), v032Element(t, "identifier", "Good", "Good", 7)), v032Text(t, "Read.", 3, 2)), "first", nil, 1)
 }
 
 // v032Unparsed задаёт ошибочный исходный диапазон. Ссылку на историю добавляет
