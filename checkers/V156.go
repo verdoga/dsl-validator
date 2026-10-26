@@ -3,7 +3,6 @@ package checkers
 import (
 	"fmt"
 	"strings"
-	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -165,7 +164,7 @@ func v156Count(lines diagnostics.Lines, opening int, index []v156Row, answer boo
 				if !known {
 					return 0, false
 				}
-				if strings.TrimFunc(text, unicode.IsSpace) != "" {
+				if answerPrimary(text) != "" {
 					count++
 				}
 			} else {
@@ -181,7 +180,7 @@ func v156Count(lines diagnostics.Lines, opening int, index []v156Row, answer boo
 			return 0, false
 		}
 		if answer {
-			text = strings.TrimFunc(text, unicode.IsSpace)
+			text = answerPrimary(text)
 		}
 		if text != "" {
 			count++

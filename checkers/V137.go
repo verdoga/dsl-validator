@@ -2,7 +2,6 @@ package checkers
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -33,7 +32,7 @@ func checkV137(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		}
 		name, _ := tag.Value()
 		block := index[number]
-		if name != "answer" || block.literal || !block.bounds || !block.empty ||
+		if name != "answer" || block.literal || !block.bounds || !block.empty || block.unknown ||
 			index[block.end-1].unknownBlocks != block.unknownBlocks {
 			continue
 		}
@@ -63,15 +62,15 @@ func v137Element(line diagnostics.Line, kind string) diagnostics.Element {
 
 // v137LineInfo хранит сведения только текущего запуска, по физическому номеру.
 // rootBlanks и unknownBlocks — префиксные счётчики с включённой текущей строкой.
-// empty относится только к непосредственным строкам, bounds — к границам блока.
+// empty и unknown относятся к непосредственным строкам, bounds — к границам блока.
 type v137LineInfo struct {
 	end, descendants, lastDescendant int
 	rootBlanks, unknownBlocks        int
-	literal, bounds, empty           bool
+	literal, bounds, empty, unknown  bool
 }
 
 // v137Index собирает сведения за O(N+E+R) времени; сам индекс занимает O(N) памяти:
-// N — строки, E — элементы, R — суммарная длина исходного текста. Родитель всегда
+// N — строки, E — элементы, R — длина исходного и обработанного текста. Родитель всегда
 // предшествует потомку по CheckModel, поэтому обратный проход суммирует поддеревья
 // без обхода цепочек родителей. Текст и границы каждой строки проверяются один раз.
 func v137Index(lines diagnostics.Lines) []v137LineInfo {
@@ -81,6 +80,7 @@ func v137Index(lines diagnostics.Lines) []v137LineInfo {
 		info := &index[number]
 		info.empty, info.lastDescendant = true, number
 		info.rootBlanks = index[number-1].rootBlanks
+		empty, known := v137EmptyLine(line)
 		if parent, found := line.ParentLine(); found {
 			info.literal = index[parent].literal
 			if line.Type() == "block-end" {
@@ -89,10 +89,11 @@ func v137Index(lines diagnostics.Lines) []v137LineInfo {
 				} else {
 					index[parent].end = -1
 				}
-			} else if !v137EmptyLine(line) {
-				index[parent].empty = false
+			} else {
+				index[parent].empty = index[parent].empty && empty
+				index[parent].unknown = index[parent].unknown || !known
 			}
-		} else if line.Type() == "blank" && v137EmptyLine(line) {
+		} else if line.Type() == "blank" && empty && known && strings.Trim(line.Raw(), " \t") == "" {
 			// Известная корневая blank не задаёт родителя и не разрывает тело.
 			info.rootBlanks++
 		}
@@ -152,16 +153,29 @@ func v137Bounds(lines diagnostics.Lines, opening int, index []v137LineInfo) bool
 	return true
 }
 
-// v137EmptyLine возвращает true при доказанной пустоте непосредственной строки.
-// Неизвестный текст не заменяется пустотой, содержимое вложенных тегов исключено.
-func v137EmptyLine(line diagnostics.Line) bool {
+// v137EmptyLine возвращает пустоту известных значений и полноту непосредственной
+// строки отдельно. При known == false пустота всей строки не доказана;
+// содержимое вложенных тегов не является значением ответа.
+func v137EmptyLine(line diagnostics.Line) (empty, known bool) {
 	switch line.Type() {
 	case "tag", "block-start":
-		return v137Element(line, "tag") != nil
+		return true, v137Element(line, "tag") != nil
 	case "content", "blank":
-		return v137TextKnown(line) && v137Text(line.Raw()) == ""
+		empty, known = true, v137TextKnown(line)
+		for i := 0; i < line.ElementCount(); i++ {
+			element, _ := line.Element(i)
+			if element.Type() != "content" {
+				continue
+			}
+			value, present := element.Value()
+			known = known && present
+			if present && answerPrimary(value) != "" {
+				empty = false
+			}
+		}
+		return empty, known
 	default:
-		return false
+		return true, false
 	}
 }
 
@@ -187,23 +201,4 @@ func v137TextKnown(line diagnostics.Line) bool {
 		end = element.End() - 1
 	}
 	return strings.Trim(string(raw[end:]), " \t") == ""
-}
-
-// v137Text получает отдельное значение строки answer по DSL 1.14, 1.21–1.22.
-// После экранирования сжимается Unicode White_Space и удаляются края.
-// Пунктуация, регистр и неизвестные escape-последовательности сохраняются;
-// HTML и плейсхолдеры в ответах не интерпретируются.
-func v137Text(source string) string {
-	raw := []rune(strings.Trim(source, " \t"))
-	var decoded strings.Builder
-	for i := 0; i < len(raw); i++ {
-		if raw[i] == '\\' && i+1 < len(raw) &&
-			(strings.ContainsRune("{}\\", raw[i+1]) || i == 0 && strings.ContainsRune("@#", raw[i+1])) {
-			i++
-		}
-		decoded.WriteRune(raw[i])
-	}
-	return strings.Join(strings.FieldsFunc(decoded.String(), func(char rune) bool {
-		return unicode.Is(unicode.White_Space, char)
-	}), " ")
 }

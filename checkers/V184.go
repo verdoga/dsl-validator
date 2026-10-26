@@ -94,7 +94,7 @@ func v184Answers(rows []diagnostics.Line) ([]diagnostics.Line, bool) {
 		if text == "---" {
 			return nil, false
 		}
-		if text == "" || row.Type() == "blank" {
+		if v184Blank(row) {
 			continue
 		}
 		name := v184Tag(row)
@@ -124,6 +124,9 @@ func v184Answers(rows []diagnostics.Line) ([]diagnostics.Line, bool) {
 // v184Positions возвращает непустое множество позиций с нулевой индексацией.
 // Одно недопустимое значение отменяет весь набор, а не удаляется из него.
 func v184Positions(answer diagnostics.Line, children []diagnostics.Line, count int) ([]int, bool) {
+	if answer.Type() != "tag" && answer.Type() != "block-start" || v184HasUnparsed(answer) {
+		return nil, false
+	}
 	rows := []diagnostics.Line{answer}
 	block := answer.Type() == "block-start"
 	if block {
@@ -138,8 +141,11 @@ func v184Positions(answer diagnostics.Line, children []diagnostics.Line, count i
 	limit := strconv.Itoa(count)
 	for _, row := range rows {
 		if block {
-			if strings.Trim(row.Raw(), " \t") == "" || row.Type() == "blank" {
+			if v184Blank(row) {
 				continue
+			}
+			if row.Type() == "invalid" || v184HasUnparsed(row) {
+				return nil, false
 			}
 			if row.Type() == "block-start" || v184Tag(row) != "" {
 				continue
@@ -160,7 +166,7 @@ func v184Positions(answer diagnostics.Line, children []diagnostics.Line, count i
 	return positions, len(positions) != 0
 }
 
-// v184Number читает целое обработанное значение без нормализации и декодирования.
+// v184Number нормализует обработанное значение без повторного декодирования.
 // Ноль означает неизвестное значение, неверную запись либо выход из 1…limit.
 func v184Number(line diagnostics.Line, limit string) int {
 	var text strings.Builder
@@ -180,14 +186,9 @@ func v184Number(line diagnostics.Line, limit string) int {
 		text.WriteString(value)
 		end = element.End()
 	}
-	number := text.String()
-	if number == "" || number[0] < '1' || number[0] > '9' {
+	number, known := answerPosition(text.String())
+	if !known {
 		return 0
-	}
-	for index := 1; index < len(number); index++ {
-		if number[index] < '0' || number[index] > '9' {
-			return 0
-		}
 	}
 	if len(number) > len(limit) || len(number) == len(limit) && number > limit {
 		return 0
@@ -198,6 +199,11 @@ func v184Number(line diagnostics.Line, limit string) int {
 		return 0
 	}
 	return position
+}
+
+// v184Blank отличает физическую пустую строку от пустого значения content.
+func v184Blank(line diagnostics.Line) bool {
+	return line.Type() == "blank" && strings.Trim(line.Raw(), " \t") == ""
 }
 
 // v184MaximumMatching находит максимум, сохраняя отдельные экземпляры элементов.

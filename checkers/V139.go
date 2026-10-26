@@ -2,7 +2,6 @@ package checkers
 
 import (
 	"fmt"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
@@ -110,9 +109,9 @@ func v139Descendant(lines diagnostics.Lines, line diagnostics.Line, block int) b
 	return false
 }
 
-// v139NonemptyText возвращает true для текстовой строки с непробельным content.
-// Value уже содержит результат снятия экранирования; повторного декодирования,
-// склейки элементов, нормализации регистра и сравнения ответов здесь нет.
+// v139NonemptyText возвращает true для текстовой строки с непустой основной формой content.
+// Value уже содержит результат снятия экранирования; элементы не склеиваются
+// и ответы не сравниваются. Пунктуационный content считается непустым.
 func v139NonemptyText(line diagnostics.Line) bool {
 	if line.Type() != "content" {
 		return false
@@ -123,10 +122,8 @@ func v139NonemptyText(line diagnostics.Line) bool {
 			continue
 		}
 		text, _ := element.Value()
-		for _, char := range text {
-			if !unicode.Is(unicode.White_Space, char) {
-				return true
-			}
+		if answerPrimary(text) != "" {
+			return true
 		}
 	}
 	return false

@@ -57,6 +57,9 @@ func TestV171Groups(t *testing.T) {
 		{"two groups", "Да", []string{"Да", "да", "Нет", "нет"}, []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}, {10, 1, 4, [][3]int{{9, 1, 4}}}}},
 		{"interleaved groups ordered by second occurrence", "Да", []string{"Да", "Нет", "нет", "да"}, []v171Expected{{9, 1, 4, [][3]int{{8, 1, 4}}}, {10, 1, 3, [][3]int{{7, 1, 3}}}}},
 		{"unused duplicate", "Нет", []string{"Нет", "Да", "да"}, []v171Expected{{9, 1, 3, [][3]int{{8, 1, 3}}}}},
+		{"answer matches primary and additional targets", "Yes", []string{"Yes", "YES!"}, []v171Expected{{8, 1, 5, [][3]int{{7, 1, 4}}}}},
+		{"answer matches additional and primary targets", "Yes", []string{"YES!", "Yes"}, []v171Expected{{8, 1, 4, [][3]int{{7, 1, 5}}}}},
+		{"unused normalized duplicate", "Нет", []string{"Нет", "Yes", "YES!"}, []v171Expected{{9, 1, 5, [][3]int{{8, 1, 4}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var lower []model.Line
@@ -69,6 +72,12 @@ func TestV171Groups(t *testing.T) {
 }
 
 func TestV171AutomaticMode(t *testing.T) {
+	unknown := v171TestTag(t, "answer", "content", "{bad", 3, 2)
+	unknown.Elements = unknown.Elements[:1]
+	partial := v171TestTag(t, "answer", "content", "Да", 3, 2)
+	partial.Raw += "{bad"
+	partial.Elements = append(partial.Elements, v171TestElement(t, "unparsed", "{bad", "", 11, 15))
+	partial.Elements[2].Value = nil
 	for _, tc := range []struct {
 		name      string
 		upper     []model.Line
@@ -90,14 +99,89 @@ func TestV171AutomaticMode(t *testing.T) {
 		{"foreign block interrupts", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestOpen(t, "note", 3, 2), v171TestText(t, "Замечание", "Замечание", 5, 3), v171TestClose(t, 5, 3), v171TestTag(t, "answer", "content", "Да", 3, 2)}, nil, 5},
 		{"block answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestOpen(t, "answer", 3, 2), v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, "Нет", "Нет", 5, 3), v171TestClose(t, 5, 3)}, []v171Expected{{11, 1, 3, [][3]int{{10, 1, 3}}}}, 0},
 		{"block hint after answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2), v171TestOpen(t, "hint", 3, 2), v171TestText(t, "Подумайте.", "Подумайте.", 6, 3), v171TestClose(t, 6, 3)}, []v171Expected{{11, 1, 3, [][3]int{{10, 1, 3}}}}, 0},
-		{"empty answer still one declaration", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "", "", 3, 2)}, []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}}, 5},
+		{"empty answer disables automatic mode", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "", "", 3, 2)}, nil, 5},
+		{"empty content answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", "", 3, 2)}, nil, 0},
+		{"ASCII whitespace answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", " \t", 3, 2)}, nil, 0},
+		{"Unicode whitespace answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", "\u00a0\u2003", 3, 2)}, nil, 0},
+		{"unknown raw answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), unknown}, nil, 0},
+		{"partially parsed answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), partial}, nil, 0},
+		{"later unavailable answer suppresses all duplicates", []model.Line{v171TestText(t, "Первый", "Первый", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2), v171TestText(t, "Второй", "Второй", 3, 2), unknown}, nil, 0},
+		{"punctuation answer remains available", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", "!", 3, 2)}, []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := v171TestMatching(t, tc.upper, v171TestText(t, "Да", "Да", 3, 2), v171TestText(t, "да", "да", 3, 2), v171TestText(t, "Нет", "Нет", 3, 2))
+			for _, line := range result.Lines {
+				for index, element := range line.Elements {
+					if element.ElementType == "unparsed" {
+						v171TestError(t, result, line.Number, index, "Не разобран остаток ответа.")
+					}
+				}
+			}
 			if tc.errorLine != 0 {
 				v171TestError(t, result, tc.errorLine, -1, "Нарушены правила содержимого или размещения тега.")
 			}
 			v171TestRun(t, result, "current", tc.want)
+		})
+	}
+}
+
+func TestV171BlockAnswerAvailability(t *testing.T) {
+	unknown := v171TestLine(t, "{bad", "content", 5, 3)
+	unparsed := v171TestLine(t, "{bad", "invalid", 5, 3,
+		v171TestElement(t, "unparsed", "{bad", "", 1, 5))
+	unparsed.Elements[0].Value = nil
+	whitespaceUnparsed := v171TestLine(t, " \t", "invalid", 5, 3,
+		v171TestElement(t, "unparsed", " \t", "", 1, 3))
+	whitespaceUnparsed.Elements[0].Value = nil
+	partial := v171TestLine(t, "Да{bad", "content", 5, 3,
+		v171TestElement(t, "content", "Да", "Да", 1, 3), v171TestElement(t, "unparsed", "{bad", "", 3, 7))
+	partial.Elements[1].Value = nil
+	for _, tc := range []struct {
+		name         string
+		alternatives []model.Line
+		available    bool
+	}{
+		{"all alternatives available", []model.Line{v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, "Нет", "Нет", 5, 3)}, true},
+		{"empty block", nil, false},
+		{"blank block", []model.Line{v171TestBlank(t, " \t", 5, 3)}, false},
+		{"blank lines around alternative", []model.Line{v171TestBlank(t, "", 5, 3), v171TestText(t, "Да", "Да", 5, 3), v171TestBlank(t, "\t", 5, 3)}, true},
+		{"ASCII whitespace first alternative", []model.Line{v171TestText(t, " \t", " \t", 5, 3), v171TestText(t, "Да", "Да", 5, 3)}, false},
+		{"ASCII whitespace last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, " \t", " \t", 5, 3)}, false},
+		{"whitespace unparsed first alternative", []model.Line{whitespaceUnparsed, v171TestText(t, "Да", "Да", 5, 3)}, false},
+		{"whitespace unparsed last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), whitespaceUnparsed}, false},
+		{"ASCII whitespace raw with known value", []model.Line{v171TestText(t, " \t", "Да", 5, 3)}, true},
+		{"empty first alternative", []model.Line{v171TestText(t, "\u00a0\u2003", "\u00a0\u2003", 5, 3), v171TestText(t, "Да", "Да", 5, 3)}, false},
+		{"empty last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, "\u00a0\u2003", "\u00a0\u2003", 5, 3)}, false},
+		{"unknown first alternative", []model.Line{unknown, v171TestText(t, "Да", "Да", 5, 3)}, false},
+		{"unknown last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), unknown}, false},
+		{"unparsed first alternative", []model.Line{unparsed, v171TestText(t, "Да", "Да", 5, 3)}, false},
+		{"unparsed last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), unparsed}, false},
+		{"partial first alternative", []model.Line{partial, v171TestText(t, "Да", "Да", 5, 3)}, false},
+		{"partial last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), partial}, false},
+		{"tag is not an alternative", []model.Line{v171TestTag(t, "hint", "content", "Да", 5, 3)}, false},
+		{"punctuation alternative remains available", []model.Line{v171TestText(t, "!", "!", 5, 3)}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upper := []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestOpen(t, "answer", 3, 2)}
+			for _, alternative := range tc.alternatives {
+				alternative.Elements = append([]model.Element{}, alternative.Elements...)
+				upper = append(upper, alternative)
+			}
+			upper = append(upper, v171TestClose(t, 5, 3))
+			first := len(upper) + 5
+			var want []v171Expected
+			if tc.available {
+				want = []v171Expected{{first + 1, 1, 3, [][3]int{{first, 1, 3}}}}
+			}
+			result := v171TestMatching(t, upper, v171TestText(t, "Да", "Да", 3, 2), v171TestText(t, "да", "да", 3, 2))
+			for _, line := range result.Lines {
+				for index, element := range line.Elements {
+					if element.ElementType == "unparsed" {
+						v171TestError(t, result, line.Number, index, "Не разобран остаток ответа.")
+					}
+				}
+			}
+			v171TestRun(t, result, "current", want)
 		})
 	}
 }
@@ -129,9 +213,9 @@ func TestV171IncompleteAndFragmentedContent(t *testing.T) {
 		first, second model.Line
 		want          []v171Expected
 	}{
-		{"content omits escaped prefix", v171TestLine(t, `\@Apple`, "content", 3, 2,
+		{"escaped prefix removed during comparison", v171TestLine(t, `\@Apple`, "content", 3, 2,
 			v171TestElement(t, "content", "Apple", "Apple", 3, 8)),
-			v171TestText(t, "Apple", "Apple", 3, 2), nil},
+			v171TestText(t, "Apple", "Apple", 3, 2), []v171Expected{{8, 1, 6, [][3]int{{7, 1, 8}}}}},
 		{"content omits escaped suffix", v171TestLine(t, `Apple\{x\}`, "content", 3, 2,
 			v171TestElement(t, "content", "Apple", "Apple", 1, 6)),
 			v171TestText(t, "Apple", "Apple", 3, 2), nil},
@@ -141,12 +225,12 @@ func TestV171IncompleteAndFragmentedContent(t *testing.T) {
 		{"fragmented braces", v171TestLine(t, `\{Apple\}`, "content", 3, 2,
 			v171TestElement(t, "content", `\{Apple`, "{Apple", 1, 8), v171TestElement(t, "content", `\}`, "}", 8, 10)),
 			v171TestText(t, `\{apple\}`, "{apple}", 3, 2), []v171Expected{{8, 1, 10, [][3]int{{7, 1, 10}}}}},
-		{"fragmented backslash is decoded once", v171TestLine(t, `\\@Apple`, "content", 3, 2,
+		{"fragmented backslash removed during comparison", v171TestLine(t, `\\@Apple`, "content", 3, 2,
 			v171TestElement(t, "content", `\\`, `\`, 1, 3), v171TestElement(t, "content", "@Apple", "@Apple", 3, 9)),
-			v171TestText(t, `\@apple`, "@apple", 3, 2), nil},
-		{"fragmented gaps remain significant", v171TestLine(t, "A  B", "content", 3, 2,
+			v171TestText(t, `\@apple`, "@apple", 3, 2), []v171Expected{{8, 1, 8, [][3]int{{7, 1, 9}}}}},
+		{"fragmented gaps collapsed during comparison", v171TestLine(t, "A  B", "content", 3, 2,
 			v171TestElement(t, "content", "A", "A", 1, 2), v171TestElement(t, "content", "B", "B", 4, 5)),
-			v171TestText(t, "A B", "A B", 3, 2), nil},
+			v171TestText(t, "A B", "A B", 3, 2), []v171Expected{{8, 1, 4, [][3]int{{7, 1, 5}}}}},
 		{"fragmented gaps retained in duplicate", v171TestLine(t, "A  B", "content", 3, 2,
 			v171TestElement(t, "content", "A", "A", 1, 2), v171TestElement(t, "content", "B", "B", 4, 5)),
 			v171TestText(t, "a  b", "a  b", 3, 2), []v171Expected{{8, 1, 5, [][3]int{{7, 1, 5}}}}},
@@ -163,24 +247,31 @@ func TestV171LabelsAndEscaping(t *testing.T) {
 		name, raw1, value1, raw2, value2 string
 		want                             []v171Expected
 	}{
-		{"inner spaces preserved", "A B", "A B", "A  B", "A  B", nil},
-		{"tab differs from space", "A B", "A B", "A\tB", "A\tB", nil},
-		{"punctuation preserved", "Да", "Да", "Да!", "Да!", nil},
-		{"NBSP preserved", "Да", "Да", "Да\u00a0", "Да\u00a0", nil},
+		{"inner spaces collapsed", "A B", "A B", "A  B", "A  B", []v171Expected{{8, 1, 5, [][3]int{{7, 1, 4}}}}},
+		{"tab equals space", "A B", "A B", "A\tB", "A\tB", []v171Expected{{8, 1, 4, [][3]int{{7, 1, 4}}}}},
+		{"punctuation removed", "Да", "Да", "Да!", "Да!", []v171Expected{{8, 1, 4, [][3]int{{7, 1, 3}}}}},
+		{"NBSP trimmed", "Да", "Да", "Да\u00a0", "Да\u00a0", []v171Expected{{8, 1, 4, [][3]int{{7, 1, 3}}}}},
+		{"Unicode spaces collapsed", "A\u00a0\u2003B", "A\u00a0\u2003B", "a\u2009b", "a\u2009b", []v171Expected{{8, 1, 4, [][3]int{{7, 1, 5}}}}},
+		{"narrow NBSP equals space", "A B", "A B", "a\u202fb", "a\u202fb", []v171Expected{{8, 1, 4, [][3]int{{7, 1, 4}}}}},
+		{"Unicode edge spaces trimmed", "\u2003Yes\u00a0", "\u2003Yes\u00a0", "\u202fYES!\u2009", "\u202fYES!\u2009", []v171Expected{{8, 1, 7, [][3]int{{7, 1, 6}}}}},
+		{"Unicode empty labels excluded", "\u00a0\u2003", "\u00a0\u2003", "\u202f\u2009", "\u202f\u2009", nil},
+		{"same punctuation remains duplicate", "!", "!", "!", "!", []v171Expected{{8, 1, 2, [][3]int{{7, 1, 2}}}}},
+		{"different punctuation stays distinct", "!", "!", "?", "?", nil},
+		{"long s stays distinct", "ſ", "ſ", "S", "S", nil},
 		{"no Unicode normalization", "é", "é", "e\u0301", "e\u0301", nil},
 		{"Unicode case", "ЁЖ", "ЁЖ", "ёж", "ёж", []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}}},
 		{"Unicode columns", "🌞Да", "🌞Да", "🌞да", "🌞да", []v171Expected{{8, 1, 4, [][3]int{{7, 1, 4}}}}},
 		{"escaped braces", `\{Да\}`, "{Да}", `\{да\}`, "{да}", []v171Expected{{8, 1, 7, [][3]int{{7, 1, 7}}}}},
 		{"ordinary backslash preserved", `\q`, `\q`, `\\q`, `\q`, []v171Expected{{8, 1, 4, [][3]int{{7, 1, 3}}}}},
-		{"no repeated decoding", `\\@note`, `\@note`, `\@note`, "@note", nil},
+		{"backslash removed during comparison", `\\@note`, `\@note`, `\@note`, "@note", []v171Expected{{8, 1, 7, [][3]int{{7, 1, 8}}}}},
 		{"initial at", `\@note`, "@note", `\@NOTE`, "@NOTE", []v171Expected{{8, 1, 7, [][3]int{{7, 1, 7}}}}},
 		{"initial hash", `\#цвет`, "#цвет", `\#ЦВЕТ`, "#ЦВЕТ", []v171Expected{{8, 1, 7, [][3]int{{7, 1, 7}}}}},
 		{"escaped separator", `\---`, "---", `\---`, "---", []v171Expected{{8, 1, 5, [][3]int{{7, 1, 5}}}}},
-		{"noninitial at keeps slash", `A\@B`, `A\@B`, `A@B`, `A@B`, nil},
-		{"noninitial hash keeps slash", `A\#B`, `A\#B`, `A#B`, `A#B`, nil},
+		{"noninitial at and slash removed", `A\@B`, `A\@B`, `A@B`, `A@B`, []v171Expected{{8, 1, 4, [][3]int{{7, 1, 5}}}}},
+		{"noninitial hash and slash removed", `A\#B`, `A\#B`, `A#B`, `A#B`, []v171Expected{{8, 1, 4, [][3]int{{7, 1, 5}}}}},
 		{"underscores not placeholders", `\_____`, `\_____`, `_____`, `_____`, nil},
-		{"HTML not interpreted", `\<b\>`, `\<b\>`, `<b>`, `<b>`, nil},
-		{"cell separator not special", `a\|b`, `a\|b`, `a|b`, `a|b`, nil},
+		{"HTML backslashes removed during comparison", `\<b\>`, `\<b\>`, `<b>`, `<b>`, []v171Expected{{8, 1, 4, [][3]int{{7, 1, 6}}}}},
+		{"cell separator backslash removed during comparison", `a\|b`, `a\|b`, `a|b`, `a|b`, []v171Expected{{8, 1, 4, [][3]int{{7, 1, 5}}}}},
 	} {
 		for _, fallback := range []bool{false, true} {
 			t.Run(tc.name+" raw="+strconv.FormatBool(fallback), func(t *testing.T) {

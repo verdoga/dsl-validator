@@ -41,7 +41,7 @@ func checkV183(lines diagnostics.Lines, findings diagnostics.Findings) error {
 				separator, count = index, count+1
 			}
 		}
-		if count != 1 || !v183Answered(children[:separator]) {
+		if count != 1 || !v183Answered(children[:separator], bodies) {
 			continue
 		}
 		var labels []v183Label
@@ -51,7 +51,7 @@ func checkV183(lines diagnostics.Lines, findings diagnostics.Findings) error {
 				known = false
 				break
 			}
-			if ordinary && label.text != "" {
+			if ordinary && answerPrimary(label.text) != "" {
 				labels = append(labels, label)
 			}
 		}
@@ -76,6 +76,7 @@ type v183Body struct {
 // что родитель предшествует потомку: обратный обход сворачивает каждое ребро один раз.
 // Пропуск чужих строк обнаруживается по длине диапазона и размеру поддерева;
 // закрытие должно быть единственным и последним потомком своего блока.
+// Исключаются только физические blank; пустоту content и invalid определяет Value.
 func v183Bodies(lines diagnostics.Lines) []v183Body {
 	bodies := make([]v183Body, lines.Len()+1)
 	for number := 1; number <= lines.Len(); number++ {
@@ -87,7 +88,7 @@ func v183Bodies(lines diagnostics.Lines) []v183Body {
 		if line.Type() == "block-end" {
 			parent.broken = parent.broken || parent.closed != 0 || strings.Trim(line.Raw(), " \t") != "}"
 			parent.closed = number
-		} else if strings.Trim(line.Raw(), " \t") != "" {
+		} else if line.Type() != "blank" || strings.Trim(line.Raw(), " \t") != "" {
 			parent.children = append(parent.children, line)
 		}
 	}
@@ -119,28 +120,45 @@ func v183Tag(line diagnostics.Line) string {
 	return strings.ToLower(name)
 }
 
-// v183Answered требует ровно один соседний ответ у каждого верхнего элемента.
-// Пустые строки уже исключены, другие конструкции при поиске не пропускаются.
-func v183Answered(upper []diagnostics.Line) bool {
-	items := make([]bool, len(upper))
-	count := 0
-	for index, line := range upper {
-		label, ordinary, known := v183Text(line)
-		if !known {
+// v183Answered подтверждает полные связи каждого отдельного элемента с answer.
+// Все альтернативы должны быть известны и непусты; один hint после ответа допустим.
+func v183Answered(upper []diagnostics.Line, bodies []v183Body) bool {
+	for index := 0; index < len(upper); {
+		label, ordinary, known := v183Text(upper[index])
+		if !known || !ordinary || answerPrimary(label.text) == "" || index+1 == len(upper) {
 			return false
 		}
-		items[index] = ordinary && label.text != ""
-		if items[index] {
-			count++
-			if index+1 == len(upper) || v183Tag(upper[index+1]) != "answer" {
+		answer := upper[index+1]
+		if v183Tag(answer) != "answer" || (answer.Type() != "tag" && answer.Type() != "block-start") {
+			return false
+		}
+		rows, inline := []diagnostics.Line{answer}, answer.Type() == "tag"
+		if !inline {
+			body := bodies[answer.Number()]
+			if body.broken || body.last-answer.Number() != body.size-1 {
+				return false
+			}
+			rows = body.children
+		}
+		if len(rows) == 0 {
+			return false
+		}
+		for _, row := range rows {
+			if !inline && row.Type() != "content" && row.Type() != "invalid" {
+				return false
+			}
+			value, ok := v170Text(row, inline, false)
+			if !ok || answerPrimary(value.text) == "" {
 				return false
 			}
 		}
-		if v183Tag(line) == "answer" && (index == 0 || !items[index-1]) {
-			return false
+		index += 2
+		if index < len(upper) && v183Tag(upper[index]) == "hint" &&
+			(upper[index].Type() == "tag" || upper[index].Type() == "block-start") {
+			index++
 		}
 	}
-	return count != 0
+	return len(upper) != 0
 }
 
 // v183Text отличает обычную строку от конструкции и возвращает определимость.
@@ -236,13 +254,13 @@ func v183Unescape(raw string) (string, bool) {
 	return text.String(), true
 }
 
-// v183Report объединяет повторы по EqualFold без иных преобразований подписи.
+// v183Report объединяет повторы по полному сравнению ответов.
 func v183Report(labels []v183Label, findings diagnostics.Findings) error {
 	var groups [][]v183Label
 	for _, label := range labels {
 		found := false
 		for index, group := range groups {
-			if strings.EqualFold(group[0].text, label.text) {
+			if answerEqual(group[0].text, label.text) {
 				groups[index] = append(group, label)
 				found = true
 				break

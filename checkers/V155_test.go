@@ -85,6 +85,39 @@ func TestV155ModesAndEscapes(t *testing.T) {
 	}
 }
 
+func TestV155UnifiedAnswerSemantics(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, value string
+		want             []v155Expected
+	}{
+		{"punctuation-only answer is special", "_____ _____{!}", "_____ _____{!}",
+			[]v155Expected{{[4]int{3, 1, 5, 2}, [][4]int{{4, 1, 4, 6}}}}},
+		{"Unicode-only answer suppresses warning", "_____ _____{\u00a0\u2003\u202f\u3000}", "_____ _____{\u00a0\u2003\u202f\u3000}", nil},
+		{"Unicode-only alternative suppresses warning", "_____ _____{!}{\u00a0\u2003\u202f}", "_____ _____{!}{\u00a0\u2003\u202f}", nil},
+		{"Unicode-only later field suppresses warning", "_____ _____{!} _____{\u00a0\u2003}", "_____ _____{!} _____{\u00a0\u2003}", nil},
+		{"ambiguous alternative suppresses warning", "_____ _____{!}{?{;}", "_____ _____{!}{?{;}", nil},
+		{"escaped ordinary does not mix with punctuation answer", `\_____ _____{!}`, "_____ _____{!}", nil},
+		{"escaped special does not mix with ordinary", `_____ \_____\{!\}`, "_____ _____{!}", nil},
+		{"punctuation alternatives belong to one field", "_____{!}{?}{;}", "_____{!}{?}{;}", nil},
+		{"punctuation alternatives keep one mixed block", "_____ _____{!}{?}{;}", "_____ _____{!}{?}{;}",
+			[]v155Expected{{[4]int{3, 1, 5, 2}, [][4]int{{4, 1, 4, 6}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v155TestRun(t, v155TestDocument(t, v155TestOpen(t, "multifill", 2, 1),
+				v155TestText(t, tc.raw, tc.value, 3, 2), v155TestClose(t, 3, 2)), "current", tc.want)
+		})
+	}
+
+	t.Run("mixed punctuation alternatives preserve source ranges", func(t *testing.T) {
+		result := v155TestDocument(t, v155TestOpen(t, "multifill", 2, 1),
+			v155TestText(t, "Я🙂 _____ _____{!}{?}", "Я🙂 _____ _____{!}{?}", 3, 2),
+			v155TestText(t, `\_____ _____`, "_____ _____", 3, 2),
+			v155TestText(t, "_____{;}{:} _____", "_____{;}{:} _____", 3, 2), v155TestClose(t, 3, 2))
+		v155TestRun(t, result, "current", []v155Expected{{[4]int{3, 1, 7, 2},
+			[][4]int{{4, 4, 4, 9}, {5, 8, 5, 13}, {6, 13, 6, 18}}}})
+	})
+}
+
 func TestV155AmbiguitySuppressesWholeBlock(t *testing.T) {
 	for _, tc := range []struct{ name, raw string }{
 		{"single underscore", "_"}, {"two underscores", "__"}, {"four underscores", "____"},

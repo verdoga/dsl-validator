@@ -2,7 +2,6 @@ package checkers
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -20,8 +19,8 @@ func registrationV136(registry *diagnostics.Registry) error {
 	})
 }
 
-// checkV136 проверяет полный хвост физической строки, в том числе unparsed
-// и участки вне content. Ошибки размещения и повторения не исключают объявление.
+// checkV136 проверяет доказанную пустоту хвоста физической строки.
+// Ошибки размещения и повторения не исключают объявление.
 func checkV136(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
@@ -33,8 +32,8 @@ func checkV136(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if !strings.EqualFold(name, "answer") || v136Block(line) || v136Excluded(lines, line) {
 			continue
 		}
-		rest := []rune(line.Raw())[tag.End()-1:]
-		if v136AnswerText(rest) != "" {
+		text, known := v136AnswerText(line, tag)
+		if !known || answerPrimary(text) != "" {
 			continue
 		}
 		if _, err := findings.Add(number, tag.Start(), number, tag.End(), ""); err != nil {
@@ -97,24 +96,39 @@ func v136Excluded(lines diagnostics.Lines, line diagnostics.Line) bool {
 	return false
 }
 
-// v136AnswerText снимает разрешённое экранирование исходного хвоста слева
-// направо, затем сжимает Unicode White_Space и удаляет краевые пробелы.
-// В служебном answer нет плейсхолдеров и HTML; @ и # здесь не начинают строку.
-// Неизвестные escape-пары, пунктуация и регистр сохраняются. Результат не разбирается повторно.
-func v136AnswerText(raw []rune) string {
-	var decoded strings.Builder
-	for index := 0; index < len(raw); index++ {
-		char := raw[index]
-		if char == '\\' && index+1 < len(raw) {
-			next := raw[index+1]
-			if next == '\\' || next == '{' || next == '}' {
-				char = next
-				index++
-			}
+// v136AnswerText собирает готовые content.Value() без повторного декодирования,
+// сохраняя исходные пробельные промежутки. true означает известный хвост,
+// в том числе отсутствующий; unparsed и значимые непокрытые участки дают false.
+func v136AnswerText(line diagnostics.Line, tag diagnostics.Element) (string, bool) {
+	raw := []rune(line.Raw())
+	end := tag.End() - 1
+	var text strings.Builder
+	for index := 0; index < line.ElementCount(); index++ {
+		element, _ := line.Element(index)
+		if element.Start() < tag.End() {
+			continue
 		}
-		decoded.WriteRune(char)
+		value, present := element.Value()
+		if element.Type() != "content" || !present {
+			return "", false
+		}
+		if start := element.Start() - 1; start > end {
+			gap := string(raw[end:start])
+			if answerPrimary(gap) != "" {
+				return "", false
+			}
+			text.WriteString(gap)
+		}
+		text.WriteString(value)
+		// Нулевой content внутри предыдущего элемента не уменьшает покрытие.
+		if element.End()-1 > end {
+			end = element.End() - 1
+		}
 	}
-	return strings.Join(strings.FieldsFunc(decoded.String(), func(char rune) bool {
-		return unicode.Is(unicode.White_Space, char)
-	}), " ")
+	tail := string(raw[end:])
+	if answerPrimary(tail) != "" {
+		return "", false
+	}
+	text.WriteString(tail)
+	return text.String(), true
 }

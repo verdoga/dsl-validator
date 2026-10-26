@@ -332,24 +332,30 @@ func TestV182ReferenceAndExample(t *testing.T) {
 	}
 }
 
-func TestV182ExactValues(t *testing.T) {
+func TestV182NormalizedValues(t *testing.T) {
 	for _, tc := range []struct {
 		name, answer, position string
 		end                    int
 	}{
 		{"numeric label", "1", "1", 0},
 		{"label is not an ordinal", "1", "First", 10},
+		{"punctuated numeric label", "1.", "1", 0},
 		{"numbers in text retained", "2. First", "First", 17},
+		{"digits retained after removing punctuation", "First2!", "First", 16},
 		{"Unicode case", "ПЕРВЫЙ", "первый", 0},
-		{"Unicode case variants", "Σ", "ς", 0},
-		{"two interior spaces", "First  place", "First place", 21},
-		{"interior tab", "First\tplace", "First place", 20},
+		{"final sigma is distinct", "Σ", "ς", 10},
+		{"long s is distinct", "ſ", "S", 10},
+		{"two interior spaces", "First  place", "First place", 0},
+		{"interior tab", "First\tplace", "First place", 0},
+		{"Unicode whitespace folded", "\u00a0First\u2003\u202fplace\u0085", "First place", 0},
+		{"position Unicode whitespace folded", "First place", "\u00a0FIRST\u2003\tPLACE\u202f", 0},
 		{"same interior spaces", "First  place", "FIRST  PLACE", 0},
-		{"punctuation", "First!", "First", 15},
+		{"punctuation", "BEFORE!", "Before", 0},
 		{"punctuation only", "!", "?", 10},
 		{"same punctuation", "!", "!", 0},
+		{"diacritics retained", "é", "e", 10},
 		{"no Unicode composition", "e\u0301", "é", 11},
-		{"edge NBSP preserved", "\u00a0First", "First", 15},
+		{"edge NBSP removed", "\u00a0First", "First", 0},
 		{"zero width space is not empty", "\u200b", "First", 10},
 		{"no alternatives splitting", "First/Last;Other", "First", 25},
 	} {
@@ -379,14 +385,15 @@ func TestV182EscapeAndRawFallback(t *testing.T) {
 		{"missing escaped value source span", `\{X\}`, `{X}`, "First", "First", 14},
 		{"backslash", `\\`, `\`, `\\`, `\`, 0},
 		{"unknown escape preserved", `\q`, `\q`, `\q`, `\q`, 0},
-		{"no second decoding", `\\\{X\}`, `\{X}`, `\{X\}`, `{X}`, 16},
+		{"no second decoding of backslashes", `\\\\`, `\\`, `\\`, `\`, 13},
+		{"decoded escapes compare without punctuation", `\\\{X\}`, `\{X}`, `\{X\}`, `{X}`, 0},
 		{"literal at start of lower line", "@X", "@X", `\@X`, "@X", 0},
 		{"literal hash at start of lower line", "#X", "#X", `\#X`, "#X", 0},
-		{"inline at is not initial markup", `\@X`, `\@X`, `\@X`, "@X", 12},
+		{"inline at punctuation ignored", `\@X`, `\@X`, `\@X`, "@X", 0},
 		{"escaped lower separator", "---", "---", `\---`, "---", 0},
 		{"inline separator is ordinary data", `\---`, `\---`, `\---`, "---", 13},
 		{"underscores not special here", `\_____`, `\_____`, `\_____`, `\_____`, 0},
-		{"quotes are preserved", `"First"`, `"First"`, "First", "First", 16},
+		{"quotes are ignored", `"First"`, `"First"`, "First", "First", 0},
 		{"syntactic edge spaces", " \tFirst \t", "First", " \tFirst \t", "First", 0},
 	} {
 		for _, parsed := range []bool{true, false} {
@@ -413,10 +420,12 @@ func TestV182EscapeAndRawFallback(t *testing.T) {
 func TestV182BlockValuesAndGrouping(t *testing.T) {
 	t.Run("group within one answer", func(t *testing.T) {
 		result := v182TestBlockDocument(t, "ordering", v182TestText(t, "A", "A", 3), v182TestOpen(t, "answer", "", "", 3),
-			v182TestText(t, "Missing", "Missing", 5), v182TestText(t, "MISSING", "MISSING", 5), v182TestText(t, "Other", "Other", 5), v182TestText(t, "Missing", "Missing", 5), v182TestClose(t, 5),
+			v182TestText(t, " \tMissing!  value \t", "Missing!  value", 5), v182TestText(t, "MISSING\u00a0value", "MISSING\u00a0value", 5),
+			v182TestText(t, "Other", "Other", 5), v182TestText(t, "Missing value?", "Missing value?", 5),
+			v182TestText(t, "First!", "First!", 5), v182TestText(t, "FIRST", "FIRST", 5), v182TestClose(t, 5),
 			v182TestText(t, "B", "B", 3), v182TestTag(t, "answer", "Last", "content", 3), v182TestSeparator(t, "---", 3, false),
 			v182TestText(t, "First", "First", 3), v182TestText(t, "Last", "Last", 3))
-		v182TestRun(t, result, "current", []v182TestWant{{[3]int{6, 1, 8}, [][3]int{{7, 1, 8}, {9, 1, 8}}}, {[3]int{8, 1, 6}, nil}})
+		v182TestRun(t, result, "current", []v182TestWant{{[3]int{6, 3, 18}, [][3]int{{7, 1, 14}, {9, 1, 15}}}, {[3]int{8, 1, 6}, nil}})
 	})
 	t.Run("different answers stay separate", func(t *testing.T) {
 		result := v182TestBlockDocument(t, "ordering", v182TestText(t, "A", "A", 3), v182TestTag(t, "answer", "Missing", "content", 3),
@@ -430,11 +439,23 @@ func TestV182BlockValuesAndGrouping(t *testing.T) {
 		want   []v182TestWant
 	}{
 		{"all values match", []model.Line{v182TestText(t, "first", "first", 5), v182TestText(t, "LAST", "LAST", 5)}, nil},
-		{"empty block still supplies a linked answer", nil, nil},
-		{"blank values skipped", []model.Line{v182TestLine(t, " \t", "blank", 5), v182TestText(t, "\u00a0", "\u00a0", 5)}, nil},
+		{"empty block suppresses comparison", nil, nil},
+		{"physical blank rows skipped", []model.Line{v182TestLine(t, " \t", "blank", 5), v182TestText(t, "First", "First", 5)}, nil},
 		{"lines not joined", []model.Line{v182TestText(t, "Fir", "Fir", 5), v182TestText(t, "st", "st", 5)}, []v182TestWant{{[3]int{6, 1, 4}, nil}, {[3]int{7, 1, 3}, nil}}},
+		{"punctuation only groups use primary form", []model.Line{v182TestText(t, "!", "!", 5), v182TestText(t, "?", "?", 5), v182TestText(t, "!", "!", 5)}, []v182TestWant{{[3]int{6, 1, 2}, [][3]int{{8, 1, 2}}}, {[3]int{7, 1, 2}, nil}}},
+		{"long s does not group with s", []model.Line{v182TestText(t, "ſ", "ſ", 5), v182TestText(t, "S", "S", 5)}, []v182TestWant{{[3]int{6, 1, 2}, nil}, {[3]int{7, 1, 2}, nil}}},
+		{"digits retained in missing groups", []model.Line{v182TestText(t, "1.", "1.", 5), v182TestText(t, "1", "1", 5), v182TestText(t, "2!", "2!", 5)}, []v182TestWant{{[3]int{6, 1, 3}, [][3]int{{7, 1, 2}}}, {[3]int{8, 1, 3}, nil}}},
 		{"nested values excluded", []model.Line{v182TestOpen(t, "hint", "", "", 5), v182TestText(t, "Missing", "Missing", 6), v182TestClose(t, 6), v182TestText(t, "First", "First", 5)}, nil},
-		{"unknown value does not hide known missing value", []model.Line{v182TestLine(t, "{", "invalid", 5, v182TestElement(t, "unparsed", "{", "", 1)), v182TestText(t, "Missing", "Missing", 5)}, []v182TestWant{{[3]int{7, 1, 8}, nil}}},
+		{"empty semantic value suppresses sibling missing", []model.Line{v182TestText(t, "empty", "", 5), v182TestText(t, "Missing", "Missing", 5)}, nil},
+		{"later empty value suppresses earlier missing", []model.Line{v182TestText(t, "Missing", "Missing", 5), v182TestText(t, "empty", "", 5)}, nil},
+		{"Unicode whitespace value suppresses sibling missing", []model.Line{v182TestText(t, "\u00a0", "\u00a0", 5), v182TestText(t, "Missing", "Missing", 5)}, nil},
+		{"unknown value suppresses sibling missing", []model.Line{v182TestLine(t, "?", "invalid", 5, v182TestElement(t, "unparsed", "?", "", 1)), v182TestText(t, "Missing", "Missing", 5)}, nil},
+		{"later unknown value suppresses earlier missing", []model.Line{v182TestText(t, "Missing", "Missing", 5), v182TestLine(t, "?", "invalid", 5, v182TestElement(t, "unparsed", "?", "", 1))}, nil},
+		{"unparsed content suppresses sibling missing", []model.Line{v182TestLine(t, "?", "content", 5, v182TestElement(t, "unparsed", "?", "", 1)), v182TestText(t, "Missing", "Missing", 5)}, nil},
+		{"uninterpretable fallback suppresses sibling missing", []model.Line{v182TestLine(t, "Unclosed {", "content", 5), v182TestText(t, "Missing", "Missing", 5)}, nil},
+		{"ASCII whitespace content with empty Value suppresses sibling missing", []model.Line{v182TestText(t, " \t", "", 5), v182TestText(t, "Missing", "Missing", 5)}, nil},
+		{"ASCII whitespace invalid row suppresses sibling missing", []model.Line{v182TestLine(t, " \t", "invalid", 5, v182TestElement(t, "unparsed", " \t", "", 1)), v182TestText(t, "Missing", "Missing", 5)}, nil},
+		{"ASCII whitespace content with nonempty Value participates", []model.Line{v182TestText(t, " \t", "Missing", 5), v182TestText(t, "First", "First", 5)}, []v182TestWant{{[3]int{6, 3, 3}, nil}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := []model.Line{v182TestText(t, "A", "A", 3), v182TestOpen(t, "answer", "", "", 3)}
@@ -443,6 +464,57 @@ func TestV182BlockValuesAndGrouping(t *testing.T) {
 				v182TestText(t, "First", "First", 3), v182TestText(t, "Last", "Last", 3))
 			v182TestRun(t, v182TestBlockDocument(t, "ordering", body...), "current", tc.want)
 		})
+	}
+}
+
+func TestV182AllAnswersMustBeAvailable(t *testing.T) {
+	fallback := v182TestTag(t, "answer", "Unclosed {", "content", 3)
+	fallback.Elements = fallback.Elements[:1]
+	for _, tc := range []struct {
+		name   string
+		answer model.Line
+	}{
+		{"empty inline", v182TestTag(t, "answer", "", "content", 3)},
+		{"ASCII whitespace inline", v182TestTag(t, "answer", " \t ", "content", 3)},
+		{"Unicode whitespace inline", v182TestTag(t, "answer", "\u00a0\u2003", "content", 3)},
+		{"unparsed inline", v182TestTag(t, "answer", "?", "unparsed", 3)},
+		{"uninterpretable inline fallback", fallback},
+	} {
+		for _, unavailableFirst := range []bool{true, false} {
+			t.Run(tc.name+"/unavailableFirst="+strconv.FormatBool(unavailableFirst), func(t *testing.T) {
+				first, second := tc.answer, v182TestTag(t, "answer", "Missing", "content", 3)
+				if !unavailableFirst {
+					first, second = second, first
+				}
+				result := v182TestBlockDocument(t, "ordering", v182TestText(t, "A", "A", 3), first,
+					v182TestText(t, "B", "B", 3), second, v182TestSeparator(t, "---", 3, false), v182TestText(t, "First", "First", 3))
+				v182TestRun(t, result, "current", nil)
+			})
+		}
+	}
+	for _, kind := range []string{"empty block", "empty alternative", "unknown alternative"} {
+		for _, unavailableFirst := range []bool{true, false} {
+			t.Run(kind+"/unavailableFirst="+strconv.FormatBool(unavailableFirst), func(t *testing.T) {
+				body, open := []model.Line{v182TestText(t, "A", "A", 3)}, 5
+				if !unavailableFirst {
+					body = append(body, v182TestTag(t, "answer", "Missing", "content", 3), v182TestText(t, "B", "B", 3))
+					open = 7
+				}
+				body = append(body, v182TestOpen(t, "answer", "", "", 3))
+				switch kind {
+				case "empty alternative":
+					body = append(body, v182TestText(t, "\u00a0", "\u00a0", open), v182TestText(t, "First", "First", open))
+				case "unknown alternative":
+					body = append(body, v182TestLine(t, "?", "invalid", open, v182TestElement(t, "unparsed", "?", "", 1)), v182TestText(t, "First", "First", open))
+				}
+				body = append(body, v182TestClose(t, open))
+				if unavailableFirst {
+					body = append(body, v182TestText(t, "B", "B", 3), v182TestTag(t, "answer", "Missing", "content", 3))
+				}
+				body = append(body, v182TestSeparator(t, "---", 3, false), v182TestText(t, "First", "First", 3))
+				v182TestRun(t, v182TestBlockDocument(t, "ordering", body...), "current", nil)
+			})
+		}
 	}
 }
 
@@ -460,12 +532,17 @@ func TestV182Eligibility(t *testing.T) {
 		{"two separators excluded", []model.Line{item, bad, separator, v182TestText(t, "First", "First", 3), separator}, nil},
 		{"empty upper list", []model.Line{separator, v182TestText(t, "First", "First", 3)}, nil},
 		{"none answered", []model.Line{item, v182TestText(t, "B", "B", 3), separator, v182TestText(t, "First", "First", 3)}, nil},
+		{"orphan answer before item", []model.Line{last, item, bad, separator, v182TestText(t, "First", "First", 3)}, nil},
+		{"repeated answer after item", []model.Line{item, bad, last, separator, v182TestText(t, "First", "First", 3)}, nil},
+		{"orphan block answer", []model.Line{v182TestOpen(t, "answer", "", "", 3), v182TestText(t, "Last", "Last", 4), v182TestClose(t, 4), item, bad, separator, v182TestText(t, "First", "First", 3)}, nil},
+		{"repeated block answer after item", []model.Line{item, bad, v182TestOpen(t, "answer", "", "", 3), v182TestText(t, "Last", "Last", 6), v182TestClose(t, 6), separator, v182TestText(t, "First", "First", 3)}, nil},
 		{"last element not answered", []model.Line{item, bad, v182TestText(t, "B", "B", 3), separator, v182TestText(t, "First", "First", 3)}, nil},
 		{"first element not answered", []model.Line{item, v182TestText(t, "B", "B", 3), bad, separator, v182TestText(t, "First", "First", 3)}, nil},
 		{"editor breaks adjacency", []model.Line{item, v182TestTag(t, "editor", "Check.", "content", 3), bad, separator, v182TestText(t, "First", "First", 3)}, nil},
 		{"foreign block breaks adjacency", []model.Line{item, v182TestOpen(t, "hint", "", "", 3), v182TestText(t, "Check.", "Check.", 5), v182TestClose(t, 5), bad, separator, v182TestText(t, "First", "First", 3)}, nil},
 		{"blank rows preserve adjacency", []model.Line{item, v182TestLine(t, "", "blank", 3), v182TestLine(t, " \t ", "blank", 3), bad,
 			v182TestText(t, "B", "B", 3), last, separator, v182TestText(t, "First", "First", 3), v182TestText(t, "Last", "Last", 3)}, []v182TestWant{{[3]int{7, 9, 16}, nil}}},
+		{"ASCII whitespace upper content retains item association", []model.Line{v182TestText(t, " \t", "A", 3), bad, separator, v182TestText(t, "First", "First", 3)}, []v182TestWant{{[3]int{5, 9, 16}, nil}}},
 		{"nested upper text is not an item", []model.Line{item, bad, v182TestOpen(t, "hint", "", "", 3), v182TestText(t, "Nested", "Nested", 6), v182TestClose(t, 6),
 			v182TestText(t, "B", "B", 3), last, separator, v182TestText(t, "First", "First", 3), v182TestText(t, "Last", "Last", 3)}, []v182TestWant{{[3]int{5, 9, 16}, nil}}},
 		{"answers in lower list are not linked", []model.Line{item, v182TestText(t, "B", "B", 3), separator, bad, last}, nil},
@@ -487,6 +564,7 @@ func TestV182LowerPositions(t *testing.T) {
 		{"duplicate labels allow a match", "first", []model.Line{v182TestText(t, "First", "First", 3), v182TestText(t, "FIRST", "FIRST", 3), v182TestText(t, "Last", "Last", 3)}, nil},
 		{"duplicate labels do not hide missing value", "Missing", []model.Line{v182TestText(t, "First", "First", 3), v182TestText(t, "FIRST", "FIRST", 3), v182TestText(t, "Last", "Last", 3)}, []v182TestWant{{[3]int{5, 9, 16}, nil}}},
 		{"different list sizes allowed", "First", []model.Line{v182TestText(t, "First", "First", 3), v182TestText(t, "Last", "Last", 3), v182TestText(t, "Middle", "Middle", 3)}, nil},
+		{"ASCII whitespace lower content retains position Value", "First", []model.Line{v182TestText(t, " \t", "First", 3), v182TestText(t, "Last", "Last", 3)}, nil},
 		{"empty lower set", "First", nil, []v182TestWant{{[3]int{5, 9, 14}, nil}, {[3]int{7, 9, 13}, nil}}},
 		{"invalid potential position cancels check", "Missing", []model.Line{v182TestText(t, "First", "First", 3), v182TestLine(t, "{", "invalid", 3, v182TestElement(t, "unparsed", "{", "", 1)), v182TestText(t, "Last", "Last", 3)}, nil},
 		{"unparsed content cancels check", "Missing", []model.Line{v182TestLine(t, "?", "content", 3, v182TestElement(t, "unparsed", "?", "", 1)), v182TestText(t, "Last", "Last", 3)}, nil},
@@ -499,6 +577,11 @@ func TestV182LowerPositions(t *testing.T) {
 			v182TestRun(t, v182TestPair(t, v182TestTag(t, "answer", tc.answer, "content", 3), tc.lower...), "current", tc.want)
 		})
 	}
+	t.Run("multiple items may share a position", func(t *testing.T) {
+		result := v182TestBlockDocument(t, "ordering", v182TestText(t, "A", "A", 3), v182TestTag(t, "answer", "BEFORE!", "content", 3),
+			v182TestText(t, "B", "B", 3), v182TestTag(t, "answer", "before", "content", 3), v182TestSeparator(t, "---", 3, false), v182TestText(t, "Before", "Before", 3))
+		v182TestRun(t, result, "current", nil)
+	})
 }
 
 func TestV182ContextsAndSourceRanges(t *testing.T) {

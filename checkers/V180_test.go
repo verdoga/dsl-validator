@@ -77,16 +77,16 @@ func TestV180ReferenceAndExample(t *testing.T) {
 }
 
 func TestV180NumberSyntax(t *testing.T) {
-	for _, value := range []string{"1", "9", "10", "20", "999", "999999999999999999999999999999999999999999999999999999999999", " 1\t", "", " \t", "\u00a0", "\u2003\u00a0"} {
+	for _, value := range []string{"1", "9", "10", "20", "999", "999999999999999999999999999999999999999999999999999999999999", "1.", "-1", "1/2", "1.0", `\1`, " 1\t", "\u00a01", "1\u00a0", "\u00a01.\u00a0", "", " \t", "\u00a0", "\u2003\u00a0"} {
 		t.Run("allowed or empty/"+value, func(t *testing.T) { v180Run(t, v180Base(t, value), "current", nil) })
 	}
 	for _, tc := range []struct {
 		value string
 		end   int
 	}{
-		{"0", 10}, {"01", 11}, {"00", 11}, {"+1", 11}, {"-1", 11}, {"1.0", 12}, {"1.", 11}, {"1/2", 12}, {"1e2", 12},
-		{"١", 10}, {"１", 10}, {"Ⅰ", 10}, {"1 2", 12}, {"1\t2", 12}, {"1\u00a02", 12}, {"\u00a01", 11}, {"1\u00a0", 11},
-		{"01 01", 14}, {"\u200b", 10}, {"a", 10}, {"🙂", 10}, {`\1`, 11},
+		{"0", 10}, {"01", 11}, {"00", 11}, {"+1", 11}, {"1e2", 12},
+		{"١", 10}, {"１", 10}, {"Ⅰ", 10}, {"1 2", 12}, {"1\t2", 12}, {"1\u00a02", 12},
+		{"01 01", 14}, {"\u200b", 10}, {"a", 10}, {"🙂", 10},
 	} {
 		t.Run("invalid/"+tc.value, func(t *testing.T) {
 			v180Run(t, v180Base(t, tc.value), "current", []v180Expected{{6, 9, tc.end, nil}})
@@ -107,8 +107,13 @@ func TestV180BlockValuesAndGrouping(t *testing.T) {
 			[]v180Expected{{7, 1, 3, [][3]int{{8, 1, 3}, {9, 1, 3}}}}},
 		{"different source edges", []model.Line{v180TextLine(t, "01", "01", 6, 3), v180TextLine(t, " 01\t", "01", 6, 3)},
 			[]v180Expected{{7, 1, 3, [][3]int{{8, 2, 4}}}}},
-		{"value case remains significant", []model.Line{v180TextLine(t, "A", "A", 6, 3), v180TextLine(t, "a", "a", 6, 3)},
-			[]v180Expected{{7, 1, 2, nil}, {8, 1, 2, nil}}},
+		{"case and punctuation merge invalid values", []model.Line{v180TextLine(t, "A", "A", 6, 3), v180TextLine(t, "a!", "a!", 6, 3), v180TextLine(t, " \tA?\t", "A?", 6, 3)},
+			[]v180Expected{{7, 1, 2, [][3]int{{8, 1, 3}, {9, 3, 5}}}}},
+		{"punctuation-only values remain distinct", []model.Line{v180TextLine(t, "!", "!", 6, 3), v180TextLine(t, "?", "?", 6, 3), v180TextLine(t, "!", "!", 6, 3), v180TextLine(t, "?", "?", 6, 3)},
+			[]v180Expected{{7, 1, 2, [][3]int{{9, 1, 2}}}, {8, 1, 2, [][3]int{{10, 1, 2}}}}},
+		{"composite invalid value merges with normalized alternative", []model.Line{
+			v180Line(t, " \tA!\t", "content", 6, 3, v180TestElement(t, "content", "A", "A", 3, 4), v180TestElement(t, "content", "!", "!", 4, 5)), v180TextLine(t, "a", "a", 6, 3)},
+			[]v180Expected{{7, 3, 5, [][3]int{{8, 1, 2}}}}},
 		{"blank and whitespace-only rows", []model.Line{v180Line(t, "", "blank", 6, 3), v180Line(t, " \t", "blank", 6, 3), v180TextLine(t, "\u00a0", "\u00a0", 6, 3)}, nil},
 		{"empty block", nil, nil},
 		{"processed values are not decoded twice", []model.Line{v180TextLine(t, `\\\{`, `\{`, 6, 3), v180TextLine(t, `\{`, "{", 6, 3)},
@@ -137,7 +142,7 @@ func TestV180RawFallback(t *testing.T) {
 		end        int
 	}{
 		{`\\`, `\`, 3}, {`\{`, "{", 3}, {`\}`, "}", 3}, {`\@tag`, "@tag", 6}, {`\#`, "#", 3},
-		{`\---`, `\---`, 5}, {`\_`, `\_`, 3}, {`\1`, `\1`, 3}, {`\\\{`, `\{`, 5},
+		{`\---`, `\---`, 5}, {`\_`, `\_`, 3}, {`\\\{`, `\{`, 5},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
 			// Raw и Value указаны независимо: первое значение восстановится,
@@ -146,9 +151,66 @@ func TestV180RawFallback(t *testing.T) {
 				[]v180Expected{{7, 1, tc.end, [][3]int{{8, 1, tc.end}}}})
 		})
 	}
-	t.Run("raw numeric text", func(t *testing.T) {
-		v180Run(t, v180BlockAnswer(t, v180Line(t, " \t1\t ", "content", 6, 3)), "current", nil)
-	})
+	for _, raw := range []string{" \t1\t ", `\1`} {
+		t.Run("raw numeric text/"+raw, func(t *testing.T) {
+			v180Run(t, v180BlockAnswer(t, v180Line(t, raw, "content", 6, 3), v180TextLine(t, raw, raw, 6, 3)), "current", nil)
+		})
+	}
+}
+
+func TestV180CompositeValues(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw  string
+		elements   []model.Element
+		start, end int // Нулевой диапазон означает отсутствие V180.
+	}{
+		{"adjacent digits", "12", []model.Element{v180TestElement(t, "content", "1", "1", 1, 2), v180TestElement(t, "content", "2", "2", 2, 3)}, 0, 0},
+		{"trailing punctuation", "1.", []model.Element{v180TestElement(t, "content", "1", "1", 1, 2), v180TestElement(t, "content", ".", ".", 2, 3)}, 0, 0},
+		{"negative", "-1", []model.Element{v180TestElement(t, "content", "-", "-", 1, 2), v180TestElement(t, "content", "1", "1", 2, 3)}, 0, 0},
+		{"fraction", "1/2", []model.Element{v180TestElement(t, "content", "1/", "1/", 1, 3), v180TestElement(t, "content", "2", "2", 3, 4)}, 0, 0},
+		{"decimal", "1.0", []model.Element{v180TestElement(t, "content", "1", "1", 1, 2), v180TestElement(t, "content", ".0", ".0", 2, 4)}, 0, 0},
+		{"NBSP edges", "\u00a01\u00a0", []model.Element{v180TestElement(t, "content", "1", "1", 2, 3), v180TestElement(t, "content", "", "", 3, 3)}, 0, 0},
+		{"escaped punctuation", `1\{`, []model.Element{v180TestElement(t, "content", "1", "1", 1, 2), v180TestElement(t, "content", `\{`, "{", 2, 4)}, 0, 0},
+		{"leading zero", "01", []model.Element{v180TestElement(t, "content", "0", "0", 1, 2), v180TestElement(t, "content", "1", "1", 2, 3)}, 1, 3},
+		{"plus sign", "+1", []model.Element{v180TestElement(t, "content", "+", "+", 1, 2), v180TestElement(t, "content", "1", "1", 2, 3)}, 1, 3},
+		{"zero with punctuation", "0!", []model.Element{v180TestElement(t, "content", "0", "0", 1, 2), v180TestElement(t, "content", "!", "!", 2, 3)}, 1, 3},
+		{"non-ASCII digit", "١.", []model.Element{v180TestElement(t, "content", "١", "١", 1, 2), v180TestElement(t, "content", ".", ".", 2, 3)}, 1, 3},
+		{"space gap", "1  2", []model.Element{v180TestElement(t, "content", "1", "1", 1, 2), v180TestElement(t, "content", "2", "2", 4, 5)}, 1, 5},
+		{"tab gap", "1\t2", []model.Element{v180TestElement(t, "content", "1", "1", 1, 2), v180TestElement(t, "content", "2", "2", 3, 4)}, 1, 4},
+		{"NBSP gap", "1\u00a02", []model.Element{v180TestElement(t, "content", "1", "1", 1, 2), v180TestElement(t, "content", "2", "2", 3, 4)}, 1, 4},
+		{"space inside Value", "1 2", []model.Element{v180TestElement(t, "content", "1 ", "1 ", 1, 3), v180TestElement(t, "content", "2", "2", 3, 4)}, 1, 4},
+		{"ASCII source edges", " \t0! \t", []model.Element{v180TestElement(t, "content", "0", "0", 3, 4), v180TestElement(t, "content", "!", "!", 4, 5)}, 3, 5},
+		{"NBSP source edges", "\u00a0A!\u00a0", []model.Element{v180TestElement(t, "content", "A", "A", 2, 3), v180TestElement(t, "content", "!", "!", 3, 4)}, 1, 5},
+		{"punctuation only", "!?", []model.Element{v180TestElement(t, "content", "!", "!", 1, 2), v180TestElement(t, "content", "?", "?", 2, 3)}, 1, 3},
+		{"empty annotation between parts", "01", []model.Element{v180TestElement(t, "content", "0", "0", 1, 2), v180TestElement(t, "content", "", "", 2, 2), v180TestElement(t, "content", "1", "1", 2, 3)}, 1, 3},
+		{"uncovered punctuation gap", "0!1", []model.Element{v180TestElement(t, "content", "0", "0", 1, 2), v180TestElement(t, "content", "1", "1", 3, 4)}, 0, 0},
+		{"uncovered leading text", "?01", []model.Element{v180TestElement(t, "content", "0", "0", 2, 3), v180TestElement(t, "content", "1", "1", 3, 4)}, 0, 0},
+		{"uncovered trailing text", "01?", []model.Element{v180TestElement(t, "content", "0", "0", 1, 2), v180TestElement(t, "content", "1", "1", 2, 3)}, 0, 0},
+	} {
+		for _, block := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/block %t", tc.name, block), func(t *testing.T) {
+				line, offset := 7, 0
+				var result *model.Result
+				if block {
+					result = v180BlockAnswer(t, v180Line(t, tc.raw, "content", 6, 3, tc.elements...))
+				} else {
+					line, offset = 6, 8
+					result = v180Base(t, tc.raw)
+					result.Lines[line-1].Elements = result.Lines[line-1].Elements[:1]
+					for _, element := range tc.elements {
+						element.Start += offset
+						element.End += offset
+						result.Lines[line-1].Elements = append(result.Lines[line-1].Elements, element)
+					}
+				}
+				var want []v180Expected
+				if tc.start != 0 {
+					want = []v180Expected{{line, tc.start + offset, tc.end + offset, nil}}
+				}
+				v180Run(t, result, "current", want)
+			})
+		}
+	}
 }
 
 func TestV180UncertainAnswer(t *testing.T) {
@@ -161,22 +223,27 @@ func TestV180UncertainAnswer(t *testing.T) {
 				"current", []v180Expected{{8, 9, 11, nil}})
 		})
 	}
-	for _, kind := range []model.LineType{"content", "invalid"} {
+	for _, tc := range []struct {
+		name string
+		row  model.Line
+	}{
+		{"content with unparsed", v180Line(t, `1\q`, "content", 6, 3, v180TestElement(t, "content", "1", "1", 1, 2), v180Unparsed(t, `\q`, 2, 4))},
+		{"invalid line", v180Line(t, `1\q`, "invalid", 6, 3, v180TestElement(t, "content", "1", "1", 1, 2), v180Unparsed(t, `\q`, 2, 4))},
+		{"entire value unparsed", v180Line(t, "?", "invalid", 6, 3, v180Unparsed(t, "?", 1, 2))},
+		{"uncovered content", v180Line(t, "1?", "content", 6, 3, v180TestElement(t, "content", "1", "1", 1, 2))},
+	} {
 		for _, first := range []bool{false, true} {
-			t.Run(fmt.Sprintf("block %s uncertain first %t", kind, first), func(t *testing.T) {
-				bad := v180Line(t, `1\q`, kind, 6, 3, v180TestElement(t, "content", "1", "1", 1, 2), v180Unparsed(t, `\q`, 2, 4))
-				rows := []model.Line{v180TextLine(t, "01", "01", 6, 3), bad}
+			t.Run(fmt.Sprintf("block %s uncertain first %t", tc.name, first), func(t *testing.T) {
+				line := 7
+				rows := []model.Line{v180TextLine(t, "01", "01", 6, 3), tc.row}
 				if first {
+					line = 8
 					rows[0], rows[1] = rows[1], rows[0]
 				}
-				v180Run(t, v180BlockAnswer(t, rows...), "current", nil)
+				v180Run(t, v180BlockAnswer(t, rows...), "current", []v180Expected{{line, 1, 3, nil}})
 			})
 		}
 	}
-	t.Run("unparsed entire value suppresses other values", func(t *testing.T) {
-		v180Run(t, v180BlockAnswer(t, v180TextLine(t, "01", "01", 6, 3),
-			v180Line(t, "?", "invalid", 6, 3, v180Unparsed(t, "?", 1, 2))), "current", nil)
-	})
 	t.Run("deeper uncertainty is outside checked values", func(t *testing.T) {
 		v180Run(t, v180BlockAnswer(t, v180TextLine(t, "01", "01", 6, 3), v180Open(t, "hint", "", 6, 3),
 			v180Line(t, "?", "invalid", 8, 4, v180Unparsed(t, "?", 1, 2)), v180Close(t, 8, 4)), "current", []v180Expected{{7, 1, 3, nil}})

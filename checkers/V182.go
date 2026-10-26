@@ -2,7 +2,6 @@ package checkers
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -50,12 +49,24 @@ func checkV182(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if !complete || !known {
 			continue
 		}
+		var groups [][]v182Value
 		for _, answer := range answers {
-			values := []diagnostics.Line{answer}
+			rows := []diagnostics.Line{answer}
 			if answer.Type() == "block-start" {
-				values = children[answer.Number()]
+				rows = children[answer.Number()]
 			}
-			if err := v182Compare(values, answer.Type() != "block-start", positions, findings); err != nil {
+			values, available := v182AnswerValues(rows, answer.Type() != "block-start")
+			if !available {
+				complete = false
+				break
+			}
+			groups = append(groups, values)
+		}
+		if !complete {
+			continue
+		}
+		for _, values := range groups {
+			if err := v182Compare(values, positions, findings); err != nil {
 				return err
 			}
 		}
@@ -169,28 +180,32 @@ func v182Closed(open, end int, body []diagnostics.Line) bool {
 }
 
 // v182Answers возвращает следующие за элементами ответы. complete=false означает
-// отсутствие однозначного полного набора; несвязанные ответы не сравниваются.
+// отсутствие однозначного полного набора, включая лишний несвязанный ответ.
 func v182Answers(body []diagnostics.Line, separator int, children map[int][]diagnostics.Line, ends map[int]int) (answers []diagnostics.Line, complete bool) {
-	for i, line := range body {
-		if strings.Trim(line.Raw(), " \t") == "" {
+	for i := 0; i < len(body); i++ {
+		line := body[i]
+		if line.Type() == "blank" && strings.Trim(line.Raw(), " \t") == "" {
 			continue
 		}
-		_, tag := v182Tag(line)
+		name, tag := v182Tag(line)
 		if tag != nil {
+			if name == "answer" {
+				return nil, false
+			}
 			continue
 		}
 		if line.Type() != "content" {
 			return nil, false
 		}
 		next := i + 1
-		for next < len(body) && strings.Trim(body[next].Raw(), " \t") == "" {
+		for next < len(body) && body[next].Type() == "blank" && strings.Trim(body[next].Raw(), " \t") == "" {
 			next++
 		}
 		if next == len(body) {
 			return nil, false
 		}
 		answer := body[next]
-		name, _ := v182Tag(answer)
+		name, _ = v182Tag(answer)
 		if name != "answer" {
 			return nil, false
 		}
@@ -204,6 +219,7 @@ func v182Answers(body []diagnostics.Line, separator int, children map[int][]diag
 			return nil, false
 		}
 		answers = append(answers, answer)
+		i = next
 	}
 	return answers, len(answers) > 0
 }
@@ -213,7 +229,7 @@ func v182Answers(body []diagnostics.Line, separator int, children map[int][]diag
 func v182Positions(body []diagnostics.Line) (positions []string, known bool) {
 	for _, line := range body {
 		_, tag := v182Tag(line)
-		if tag != nil || strings.Trim(line.Raw(), " \t") == "" {
+		if tag != nil || line.Type() == "blank" && strings.Trim(line.Raw(), " \t") == "" {
 			continue
 		}
 		if line.Type() != "content" {
@@ -228,21 +244,39 @@ func v182Positions(body []diagnostics.Line) (positions []string, known bool) {
 	return positions, true
 }
 
-// v182Compare группирует только отсутствующие непустые значения одного answer.
-func v182Compare(lines []diagnostics.Line, inline bool, positions []string, findings diagnostics.Findings) error {
-	var missing []v182Value
-	var occurrences []int
+// v182AnswerValues требует доступности и непустоты всех альтернатив одного answer.
+// Пустые физические строки и известные вложенные конструкции не задают альтернатив.
+func v182AnswerValues(lines []diagnostics.Line, inline bool) (values []v182Value, available bool) {
 	for _, line := range lines {
-		if !inline && line.Type() != "content" {
-			continue
+		if !inline {
+			if line.Type() == "blank" && strings.Trim(line.Raw(), " \t") == "" {
+				continue
+			}
+			if line.Type() != "content" {
+				_, tag := v182Tag(line)
+				if tag != nil || line.Type() == "heading" {
+					continue
+				}
+				return nil, false
+			}
 		}
 		value, known := v182Text(line, inline, false)
-		if !known || strings.TrimFunc(value.text, unicode.IsSpace) == "" {
-			continue
+		if !known || answerPrimary(value.text) == "" {
+			return nil, false
 		}
+		values = append(values, value)
+	}
+	return values, len(values) > 0
+}
+
+// v182Compare группирует только отсутствующие значения одного доступного answer.
+func v182Compare(values []v182Value, positions []string, findings diagnostics.Findings) error {
+	var missing []v182Value
+	var occurrences []int
+	for _, value := range values {
 		matched := false
 		for _, position := range positions {
-			if strings.EqualFold(value.text, position) {
+			if answerEqual(value.text, position) {
 				matched = true
 				break
 			}
@@ -252,7 +286,7 @@ func v182Compare(lines []diagnostics.Line, inline bool, positions []string, find
 		}
 		duplicate := -1
 		for i, earlier := range missing {
-			if strings.EqualFold(value.text, earlier.text) {
+			if answerEqual(value.text, earlier.text) {
 				duplicate = i
 				break
 			}

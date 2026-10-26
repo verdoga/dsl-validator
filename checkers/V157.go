@@ -2,7 +2,6 @@ package checkers
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -65,7 +64,7 @@ func checkV157(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			}
 			group := -1
 			for index := range groups {
-				if v157Equal(groups[index][0].label, option.label) {
+				if answerEqual(groups[index][0].label, option.label) {
 					group = index
 					break
 				}
@@ -142,36 +141,11 @@ func v157ReadOption(line diagnostics.Line, correct bool) (v157Option, bool) {
 		}
 		cursor = end
 	}
-	option.label = v157Spaces(strings.ToLower(label.String()))
+	option.label = answerPrimary(label.String())
 	if strings.Trim(string(raw[cursor:]), " \t") != "" || option.label == "" {
 		return v157Option{}, false
 	}
 	return option, true
-}
-
-// v157Spaces сворачивает Unicode White_Space и удаляет краевые пробелы.
-func v157Spaces(text string) string {
-	return strings.Join(strings.FieldsFunc(text, func(char rune) bool {
-		return unicode.Is(unicode.White_Space, char)
-	}), " ")
-}
-
-// v157Equal выполняет строгое сравнение, а при несовпадении — дополнительное
-// по 4.0.14–4.0.16. Пустые после основной нормализации подписи исключены ранее.
-func v157Equal(left, right string) bool {
-	if left == right {
-		return true
-	}
-	withoutPunctuation := func(text string) string {
-		return v157Spaces(strings.Map(func(char rune) rune {
-			if unicode.IsPunct(char) {
-				return -1
-			}
-			return char
-		}, text))
-	}
-	left, right = withoutPunctuation(left), withoutPunctuation(right)
-	return left != "" && right != "" && left == right
 }
 
 // v157Report отмечает первое вхождение с противоположным признаком, остальные

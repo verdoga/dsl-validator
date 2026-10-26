@@ -53,7 +53,7 @@ func TestV170ReferenceAndExample(t *testing.T) {
 		want                   []v170Want
 	}{
 		{"reference", "да", "@matching {\nСолнце — звезда?\n@answer да\n---\nДа\nНет\n}", nil},
-		{"example", "Да!", "@matching {\nСолнце — звезда?\n@answer Да!\n---\nДа\nНет\n}", []v170Want{{primary: [3]int{5, 9, 12}}}},
+		{"example", "Да!", "@matching {\nСолнце — звезда?\n@answer Да!\n---\nДа\nНет\n}", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := v170TestSimple(t, tc.answer, tc.answer, "Да", "Да")
@@ -77,15 +77,25 @@ func TestV170ComparisonAndRecovery(t *testing.T) {
 		want                                               []v170Want
 	}{
 		{"Unicode case", "ЁЖ", "ЁЖ", "ёж", "ёж", nil},
-		{"internal spaces", "New  York", "New  York", "New York", "New York", []v170Want{{primary: [3]int{5, 9, 18}}}},
-		{"internal tab", "A\tB", "A\tB", "A B", "A B", []v170Want{{primary: [3]int{5, 9, 12}}}},
+		{"case and punctuation", "NEW YORK!", "NEW YORK!", "New York", "New York", nil},
+		{"internal spaces", "New  York", "New  York", "New York", "New York", nil},
+		{"internal tab", "A\tB", "A\tB", "A B", "A B", nil},
+		{"internal NBSP", "New\u00a0York", "New\u00a0York", "New York", "New York", nil},
+		{"mixed Unicode whitespace", "\u2003New\t \u00a0York\u2003", "\u2003New\t \u00a0York\u2003", "New York", "New York", nil},
 		{"number retained", "1. Да", "1. Да", "Да", "Да", []v170Want{{primary: [3]int{5, 9, 14}}}},
-		{"quotes retained", "«Да»", "«Да»", `"Да"`, `"Да"`, []v170Want{{primary: [3]int{5, 9, 13}}}},
+		{"numbers differ", "Room 12!", "Room 12!", "Room 13", "Room 13", []v170Want{{primary: [3]int{5, 9, 17}}}},
+		{"quotes removed", "«Да»", "«Да»", `"Да"`, `"Да"`, nil},
 		{"ASCII edges", " \tДа\t ", "Да", " \tДа\t ", "Да", nil},
-		{"ASCII edges on missing value", " \tДа!\t ", "Да!", "Да", "Да", []v170Want{{primary: [3]int{5, 11, 14}}}},
-		{"NBSP retained", "Да\u00a0", "Да\u00a0", "Да", "Да", []v170Want{{primary: [3]int{5, 9, 12}}}},
+		{"ASCII edges on missing value", " \tX!\t ", "X!", "Да", "Да", []v170Want{{primary: [3]int{5, 11, 13}}}},
+		{"NBSP edges", "Да\u00a0", "Да\u00a0", "Да", "Да", nil},
 		{"punctuation only", "!!!", "!!!", "?", "?", []v170Want{{primary: [3]int{5, 9, 12}}}},
+		{"same punctuation only", "!!!", "!!!", "!!!", "!!!", nil},
+		{"diacritic retained", "café", "café", "cafe", "cafe", []v170Want{{primary: [3]int{5, 9, 13}}}},
 		{"no Unicode normalization", "e\u0301", "e\u0301", "é", "é", []v170Want{{primary: [3]int{5, 9, 11}}}},
+		{"long s is not s", "ſ", "ſ", "S", "S", []v170Want{{primary: [3]int{5, 9, 10}}}},
+		{"final sigma differs", "Σ", "Σ", "ς", "ς", []v170Want{{primary: [3]int{5, 9, 10}}}},
+		{"sigma lower case", "Σ", "Σ", "σ", "σ", nil},
+		{"symbol retained", "$Да", "$Да", "Да", "Да", []v170Want{{primary: [3]int{5, 9, 12}}}},
 		{"Unicode coordinates", "🌍Нет!", "🌍Нет!", "Да", "Да", []v170Want{{primary: [3]int{5, 9, 14}}}},
 		{"T retained", "T", "T", "True", "True", []v170Want{{primary: [3]int{5, 9, 10}}}},
 		{"F retained", "F", "F", "False", "False", []v170Want{{primary: [3]int{5, 9, 10}}}},
@@ -94,13 +104,13 @@ func TestV170ComparisonAndRecovery(t *testing.T) {
 		{"ASCII empty answer", " \t", "", "Да", "Да", nil},
 		{"Unicode empty answer", "\u00a0\u2003", "\u00a0\u2003", "Да", "Да", nil},
 		{"escaped braces", `a\{b\}`, "a{b}", `a\{b\}`, "a{b}", nil},
-		{"escaped missing brace", `a\{b`, "a{b", "ab", "ab", []v170Want{{primary: [3]int{5, 9, 13}}}},
-		{"no double decoding", `a\\b`, `a\b`, "ab", "ab", []v170Want{{primary: [3]int{5, 9, 13}}}},
-		{"slash pair then escaped brace", `a\\\{b`, `a\{b`, `a\{b`, "a{b", []v170Want{{primary: [3]int{5, 9, 15}}}},
-		{"unknown escape", `a\q`, `a\q`, "aq", "aq", []v170Want{{primary: [3]int{5, 9, 12}}}},
-		{"unknown trailing slash", `a\`, `a\`, "a", "a", []v170Want{{primary: [3]int{5, 9, 11}}}},
+		{"escaped brace removed as punctuation", `a\{b`, "a{b", "ab", "ab", nil},
+		{"decoded slash removed as punctuation", `a\\b`, `a\b`, "ab", "ab", nil},
+		{"slash pair then escaped brace", `a\\\{b`, `a\{b`, `a\{b`, "a{b", nil},
+		{"unknown escape slash removed as punctuation", `a\q`, `a\q`, "aq", "aq", nil},
+		{"unknown trailing slash removed as punctuation", `a\`, `a\`, "a", "a", nil},
 		{"unknown underscore escape", `\_`, `\_`, "_", "_", []v170Want{{primary: [3]int{5, 9, 11}}}},
-		{"quotes have no escape rule", `\"Да\"`, `\"Да\"`, `"Да"`, `"Да"`, []v170Want{{primary: [3]int{5, 9, 15}}}},
+		{"quotes and slashes removed as punctuation", `\"Да\"`, `\"Да\"`, `"Да"`, `"Да"`, nil},
 		{"escaped lower at", "@x", "@x", `\@x`, "@x", nil},
 		{"escaped lower hash", "# x", "# x", `\# x`, "# x", nil},
 		{"escaped lower separator", "---", "---", `\---`, "---", nil},
@@ -125,28 +135,32 @@ func TestV170BlockAnswers(t *testing.T) {
 		want []v170Want
 	}{
 		{"group repeats", []model.Line{
-			v170TestText(t, "Нет!", "Нет!", 5, 3), v170TestText(t, "НЕТ!", "НЕТ!", 5, 3), v170TestText(t, "Другое", "Другое", 5, 3),
-		}, []v170Want{{[3]int{6, 1, 5}, [][3]int{{7, 1, 5}}}, {primary: [3]int{8, 1, 7}}}},
+			v170TestText(t, "X!", "X!", 5, 3), v170TestText(t, "x", "x", 5, 3), v170TestText(t, "Другое", "Другое", 5, 3),
+		}, []v170Want{{[3]int{6, 1, 3}, [][3]int{{7, 1, 2}}}, {primary: [3]int{8, 1, 7}}}},
 		{"matched and repeated missing", []model.Line{
-			v170TestText(t, "Да", "Да", 5, 3), v170TestText(t, "Нет!", "Нет!", 5, 3), v170TestText(t, "НЕТ!", "НЕТ!", 5, 3),
-		}, []v170Want{{[3]int{7, 1, 5}, [][3]int{{8, 1, 5}}}}},
+			v170TestText(t, "ДА!", "ДА!", 5, 3), v170TestText(t, "New  York!", "New  York!", 5, 3),
+			v170TestText(t, "new\tYORK", "new\tYORK", 5, 3), v170TestText(t, "NEW\u00a0YORK!", "NEW\u00a0YORK!", 5, 3),
+		}, []v170Want{{[3]int{7, 1, 11}, [][3]int{{8, 1, 9}, {9, 1, 10}}}}},
 		{"all missing repeats related once", []model.Line{
 			v170TestText(t, "X", "X", 5, 3), v170TestText(t, "x", "x", 5, 3), v170TestText(t, "X", "X", 5, 3),
 		}, []v170Want{{[3]int{6, 1, 2}, [][3]int{{7, 1, 2}, {8, 1, 2}}}}},
-		{"punctuation distinguishes groups", []model.Line{
+		{"punctuation joins groups", []model.Line{
 			v170TestText(t, "X", "X", 5, 3), v170TestText(t, "X!", "X!", 5, 3),
-		}, []v170Want{{primary: [3]int{6, 1, 2}}, {primary: [3]int{7, 1, 3}}}},
+		}, []v170Want{{[3]int{6, 1, 2}, [][3]int{{7, 1, 3}}}}},
+		{"punctuation only groups use primary form", []model.Line{
+			v170TestText(t, "!!!", "!!!", 5, 3), v170TestText(t, "?", "?", 5, 3), v170TestText(t, "!!!", "!!!", 5, 3),
+		}, []v170Want{{[3]int{6, 1, 4}, [][3]int{{8, 1, 4}}}, {primary: [3]int{7, 1, 2}}}},
 		{"empty lines and values", []model.Line{
 			v170TestLine(t, " \t", "blank", 5, 3), v170TestText(t, "\u00a0", "\u00a0", 5, 3), v170TestText(t, "Нет", "Нет", 5, 3),
 		}, nil},
 		{"empty block", nil, nil},
 		{"deeper content excluded", []model.Line{
-			v170TestText(t, "Нет!", "Нет!", 5, 3), v170TestOpen(t, "hint", 5, 3),
+			v170TestText(t, "X!", "X!", 5, 3), v170TestOpen(t, "hint", 5, 3),
 			v170TestText(t, "Missing", "Missing", 7, 4), v170TestClose(t, 7, 4), v170TestText(t, "Да", "Да", 5, 3),
-		}, []v170Want{{primary: [3]int{6, 1, 5}}}},
+		}, []v170Want{{primary: [3]int{6, 1, 3}}}},
 		{"block markers unescaped once", []model.Line{
 			v170TestText(t, `\@x`, "@x", 5, 3), v170TestText(t, `\# x`, "# x", 5, 3), v170TestText(t, "---", "---", 5, 3),
-		}, []v170Want{{primary: [3]int{6, 1, 4}}, {primary: [3]int{7, 1, 5}}, {primary: [3]int{8, 1, 4}}}},
+		}, []v170Want{{[3]int{6, 1, 4}, [][3]int{{7, 1, 5}}}, {primary: [3]int{8, 1, 4}}}},
 		{"separator escape is not special in answer", []model.Line{
 			v170TestText(t, `\---`, `\---`, 5, 3),
 		}, []v170Want{{primary: [3]int{6, 1, 5}}}},
@@ -175,10 +189,10 @@ func TestV170Ownership(t *testing.T) {
 		{"orphan answer", []model.Line{v170TestInline(t, "answer", "X", 3, 2)}, nil},
 		{"partial answers", []model.Line{v170TestText(t, "First?", "First?", 3, 2), v170TestInline(t, "answer", "X", 3, 2), v170TestText(t, "Second?", "Second?", 3, 2)}, nil},
 		{"repeated answer", []model.Line{v170TestText(t, "Question?", "Question?", 3, 2), v170TestInline(t, "answer", "X", 3, 2), v170TestInline(t, "answer", "X", 3, 2)}, nil},
-		{"blank skipped", []model.Line{v170TestText(t, "Question?", "Question?", 3, 2), v170TestLine(t, " \t", "blank", 3, 2), v170TestInline(t, "answer", "Да!", 3, 2)}, []v170Want{{primary: [3]int{6, 9, 12}}}},
+		{"blank skipped", []model.Line{v170TestText(t, "Question?", "Question?", 3, 2), v170TestLine(t, " \t", "blank", 3, 2), v170TestInline(t, "answer", "X!", 3, 2)}, []v170Want{{primary: [3]int{6, 9, 11}}}},
 		{"hint not skipped", []model.Line{v170TestText(t, "Question?", "Question?", 3, 2), v170TestInline(t, "hint", "Hint", 3, 2), v170TestInline(t, "answer", "X", 3, 2)}, nil},
 		{"editor not skipped", []model.Line{v170TestText(t, "Question?", "Question?", 3, 2), v170TestInline(t, "editor", "Comment", 3, 2), v170TestInline(t, "answer", "X", 3, 2)}, nil},
-		{"linked hint", []model.Line{v170TestText(t, "Question?", "Question?", 3, 2), v170TestInline(t, "answer", "Да!", 3, 2), v170TestInline(t, "hint", "Missing", 3, 2)}, []v170Want{{primary: [3]int{5, 9, 12}}}},
+		{"linked hint", []model.Line{v170TestText(t, "Question?", "Question?", 3, 2), v170TestInline(t, "answer", "X!", 3, 2), v170TestInline(t, "hint", "Missing", 3, 2)}, []v170Want{{primary: [3]int{5, 9, 11}}}},
 		{"linked block hint with separator", []model.Line{v170TestText(t, "Question?", "Question?", 3, 2), v170TestInline(t, "answer", "X", 3, 2), v170TestOpen(t, "hint", 3, 2), v170TestText(t, "---", "---", 6, 3), v170TestClose(t, 6, 3)}, []v170Want{{primary: [3]int{5, 9, 10}}}},
 		{"second hint breaks association", []model.Line{v170TestText(t, "Question?", "Question?", 3, 2), v170TestInline(t, "answer", "X", 3, 2), v170TestInline(t, "hint", "Hint", 3, 2), v170TestInline(t, "hint", "Hint", 3, 2)}, nil},
 		{"no grouping across answers", []model.Line{v170TestText(t, "First?", "First?", 3, 2), v170TestInline(t, "answer", "X", 3, 2), v170TestText(t, "Second?", "Second?", 3, 2), v170TestInline(t, "answer", "x", 3, 2)}, []v170Want{{primary: [3]int{5, 9, 10}}, {primary: [3]int{7, 9, 10}}}},
@@ -206,6 +220,8 @@ func TestV170LowerListAndSeparators(t *testing.T) {
 		{"duplicate matching lower labels", []model.Line{v170TestSeparator(t, "---", 3, 2), v170TestText(t, "x", "x", 3, 2), v170TestText(t, "X", "X", 3, 2)}, nil},
 		{"single lower label still checked", []model.Line{v170TestSeparator(t, "---", 3, 2), v170TestText(t, "Да", "Да", 3, 2)}, []v170Want{{primary: [3]int{5, 9, 10}}}},
 		{"last lower label matches", []model.Line{v170TestSeparator(t, "---", 3, 2), v170TestText(t, "Да", "Да", 3, 2), v170TestText(t, "X", "X", 3, 2)}, nil},
+		{"empty lower primary excluded", []model.Line{v170TestSeparator(t, "---", 3, 2), v170TestText(t, "\u00a0\u2003", "\u00a0\u2003", 3, 2), v170TestText(t, "Да", "Да", 3, 2)}, []v170Want{{primary: [3]int{5, 9, 10}}}},
+		{"only empty lower primary", []model.Line{v170TestSeparator(t, "---", 3, 2), v170TestText(t, "\u00a0", "\u00a0", 3, 2)}, []v170Want{{primary: [3]int{5, 9, 10}}}},
 		{"nested labels excluded", []model.Line{v170TestSeparator(t, "---", 3, 2), v170TestOpen(t, "hint", 3, 2), v170TestText(t, "X", "X", 7, 3), v170TestClose(t, 7, 3), v170TestText(t, "Да", "Да", 3, 2), v170TestText(t, "Нет", "Нет", 3, 2)}, []v170Want{{primary: [3]int{5, 9, 10}}}},
 		{"inline tags are not options", []model.Line{v170TestSeparator(t, "---", 3, 2), v170TestInline(t, "answer", "X", 3, 2), v170TestInline(t, "hint", "X", 3, 2), v170TestText(t, "Да", "Да", 3, 2), v170TestText(t, "Нет", "Нет", 3, 2)}, []v170Want{{primary: [3]int{5, 9, 10}}}},
 		// Готовые A и B с единственным исходным пробелом однозначно задают A B.
@@ -241,14 +257,14 @@ func TestV170ContainersAndBoundaries(t *testing.T) {
 	for _, eol := range []string{"\n", "\r\n"} {
 		for _, finalEOL := range []bool{false, true} {
 			t.Run(strconv.Quote(eol)+"/final="+strconv.FormatBool(finalEOL), func(t *testing.T) {
-				result := v170TestSimple(t, "Да!", "Да!", "Да", "Да")
+				result := v170TestSimple(t, "X!", "X!", "Да", "Да")
 				for i := range result.Lines {
 					result.Lines[i].LineEnding = model.LineEnding(eol)
 				}
 				if !finalEOL {
 					result.Lines[len(result.Lines)-1].LineEnding = ""
 				}
-				v170TestRun(t, result, []v170Want{{primary: [3]int{5, 9, 12}}})
+				v170TestRun(t, result, []v170Want{{primary: [3]int{5, 9, 11}}})
 			})
 		}
 	}
@@ -308,6 +324,86 @@ func TestV170IndeterminateValues(t *testing.T) {
 	})
 }
 
+func TestV170MatchingPreconditions(t *testing.T) {
+	unknownInline := v170TestInline(t, "answer", "Y Z", 3, 2)
+	unknownInline.Elements[1] = v170TestElement(t, "content", "Y", "Y", 9)
+	unknownBlock := v170TestLine(t, "Y Z", "content", 7, 3, v170TestElement(t, "content", "Y", "Y", 1))
+	invalid := v170TestLine(t, "{", "invalid", 7, 3,
+		model.Element{ElementType: "unparsed", Raw: "{", Start: 1, End: 2, ErrorIDs: []string{}})
+	invalidWhitespace := v170TestLine(t, " \t", "invalid", 7, 3,
+		model.Element{ElementType: "unparsed", Raw: " \t", Start: 1, End: 3, ErrorIDs: []string{}})
+	for _, tc := range []struct {
+		name string
+		tail []model.Line
+		want []v170Want
+	}{
+		{"all linked inline values known", []model.Line{v170TestInline(t, "answer", "Y", 3, 2)},
+			[]v170Want{{primary: [3]int{5, 9, 10}}, {primary: [3]int{7, 9, 10}}}},
+		{"later item without answer", nil, nil},
+		{"later inline value unknown", []model.Line{unknownInline}, nil},
+		{"later inline value empty", []model.Line{v170TestInline(t, "answer", "", 3, 2)}, nil},
+		{"later inline value whitespace", []model.Line{v170TestInline(t, "answer", "\u00a0\u2003", 3, 2)}, nil},
+		{"later answer block empty", []model.Line{v170TestOpen(t, "answer", 3, 2), v170TestClose(t, 7, 3)}, nil},
+		{"later answer block only blanks", []model.Line{v170TestOpen(t, "answer", 3, 2), v170TestLine(t, " \t", "blank", 7, 3), v170TestClose(t, 7, 3)}, nil},
+		{"matched and missing alternatives retain source ranges", []model.Line{
+			v170TestOpen(t, "answer", 3, 2), v170TestText(t, "ДА!", "ДА!", 7, 3),
+			v170TestText(t, " \tY!\t ", "Y!", 7, 3), v170TestText(t, "y", "y", 7, 3), v170TestClose(t, 7, 3),
+		}, []v170Want{{primary: [3]int{5, 9, 10}}, {primary: [3]int{9, 3, 5}, related: [][3]int{{10, 1, 2}}}}},
+		{"unknown before known alternatives", []model.Line{
+			v170TestOpen(t, "answer", 3, 2), unknownBlock, v170TestText(t, "ДА!", "ДА!", 7, 3),
+			v170TestText(t, "Y!", "Y!", 7, 3), v170TestClose(t, 7, 3),
+		}, nil},
+		{"unknown after known alternatives", []model.Line{
+			v170TestOpen(t, "answer", 3, 2), v170TestText(t, "ДА!", "ДА!", 7, 3),
+			v170TestText(t, "Y!", "Y!", 7, 3), unknownBlock, v170TestClose(t, 7, 3),
+		}, nil},
+		{"unparsed after known alternatives", []model.Line{
+			v170TestOpen(t, "answer", 3, 2), v170TestText(t, "ДА!", "ДА!", 7, 3),
+			v170TestText(t, "Y!", "Y!", 7, 3), invalid, v170TestClose(t, 7, 3),
+		}, nil},
+		{"Unicode whitespace alternative", []model.Line{
+			v170TestOpen(t, "answer", 3, 2), v170TestText(t, "ДА!", "ДА!", 7, 3),
+			v170TestText(t, "Y!", "Y!", 7, 3), v170TestText(t, "\u00a0\u2003", "\u00a0\u2003", 7, 3), v170TestClose(t, 7, 3),
+		}, nil},
+		{"ASCII whitespace content alternative", []model.Line{
+			v170TestOpen(t, "answer", 3, 2), v170TestText(t, "ДА!", "ДА!", 7, 3),
+			v170TestText(t, "Y!", "Y!", 7, 3), v170TestText(t, " \t", " \t", 7, 3), v170TestClose(t, 7, 3),
+		}, nil},
+		{"ASCII whitespace unparsed alternative", []model.Line{
+			v170TestOpen(t, "answer", 3, 2), v170TestText(t, "ДА!", "ДА!", 7, 3),
+			v170TestText(t, "Y!", "Y!", 7, 3), invalidWhitespace, v170TestClose(t, 7, 3),
+		}, nil},
+		{"ASCII whitespace source with known value participates", []model.Line{
+			v170TestOpen(t, "answer", 3, 2), v170TestText(t, "ДА!", "ДА!", 7, 3),
+			v170TestText(t, "Y!", "Y!", 7, 3), v170TestText(t, " \t", "y", 7, 3), v170TestClose(t, 7, 3),
+		}, []v170Want{{primary: [3]int{5, 9, 10}}, {primary: [3]int{9, 1, 3}, related: [][3]int{{10, 3, 3}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []model.Line{v170TestText(t, "First?", "First?", 3, 2), v170TestInline(t, "answer", "X", 3, 2), v170TestText(t, "Second?", "Second?", 3, 2)}
+			body = append(body, tc.tail...)
+			body = append(body, v170TestSeparator(t, "---", 3, 2), v170TestText(t, "Да", "Да", 3, 2), v170TestText(t, "Нет", "Нет", 3, 2))
+			v170TestRun(t, v170TestBlock(t, "matching", body...), tc.want)
+		})
+	}
+	t.Run("later lower value unknown suppresses earlier missing answers", func(t *testing.T) {
+		result := v170TestSimple(t, "X", "X", "Да", "Да")
+		result.Lines[7].Elements[0] = v170TestElement(t, "content", "Н", "Н", 1)
+		v170TestRun(t, result, nil)
+	})
+	t.Run("earlier unknown answer suppresses later missing answer", func(t *testing.T) {
+		body := []model.Line{v170TestText(t, "First?", "First?", 3, 2), unknownInline,
+			v170TestText(t, "Second?", "Second?", 3, 2), v170TestInline(t, "answer", "X", 3, 2),
+			v170TestSeparator(t, "---", 3, 2), v170TestText(t, "Да", "Да", 3, 2)}
+		v170TestRun(t, v170TestBlock(t, "matching", body...), nil)
+	})
+	t.Run("unowned answer suppresses other linked answers", func(t *testing.T) {
+		result := v170TestBlock(t, "matching", v170TestInline(t, "answer", "Y", 3, 2),
+			v170TestText(t, "First?", "First?", 3, 2), v170TestInline(t, "answer", "X", 3, 2),
+			v170TestSeparator(t, "---", 3, 2), v170TestText(t, "Да", "Да", 3, 2))
+		v170TestRun(t, result, nil)
+	})
+}
+
 func TestV170FragmentedLowerLabels(t *testing.T) {
 	for _, tc := range []struct {
 		name, raw, answerRaw, answerValue string
@@ -316,12 +412,12 @@ func TestV170FragmentedLowerLabels(t *testing.T) {
 	}{
 		{"adjacent missing", "Yes", "Missing", "Missing", []model.Element{v170TestElement(t, "content", "Y", "Y", 1), v170TestElement(t, "content", "es", "es", 2)}, []v170Want{{primary: [3]int{5, 9, 16}}}},
 		{"adjacent matching", "Yes", "YES", "YES", []model.Element{v170TestElement(t, "content", "Y", "Y", 1), v170TestElement(t, "content", "es", "es", 2)}, nil},
-		{"space gap matches exactly", "New  York", "New  York", "New  York", []model.Element{v170TestElement(t, "content", "New", "New", 1), v170TestElement(t, "content", "York", "York", 6)}, nil},
-		{"space gap not collapsed", "New  York", "New York", "New York", []model.Element{v170TestElement(t, "content", "New", "New", 1), v170TestElement(t, "content", "York", "York", 6)}, []v170Want{{primary: [3]int{5, 9, 17}}}},
-		{"spaces inside Value retained", "New  York", "New York", "New York", []model.Element{v170TestElement(t, "content", "New  ", "New  ", 1), v170TestElement(t, "content", "York", "York", 6)}, []v170Want{{primary: [3]int{5, 9, 17}}}},
-		{"tab gap not replaced", "A\tB", "A B", "A B", []model.Element{v170TestElement(t, "content", "A", "A", 1), v170TestElement(t, "content", "B", "B", 3)}, []v170Want{{primary: [3]int{5, 9, 12}}}},
-		{"punctuation retained", "Yes!", "Yes", "Yes", []model.Element{v170TestElement(t, "content", "Y", "Y", 1), v170TestElement(t, "content", "es", "es", 2), v170TestElement(t, "content", "!", "!", 4)}, []v170Want{{primary: [3]int{5, 9, 12}}}},
-		{"Unicode fold", "Σx", "ςX", "ςX", []model.Element{v170TestElement(t, "content", "Σ", "Σ", 1), v170TestElement(t, "content", "x", "x", 2)}, nil},
+		{"space gap matches", "New  York", "New  York", "New  York", []model.Element{v170TestElement(t, "content", "New", "New", 1), v170TestElement(t, "content", "York", "York", 6)}, nil},
+		{"space gap collapsed", "New  York", "New York", "New York", []model.Element{v170TestElement(t, "content", "New", "New", 1), v170TestElement(t, "content", "York", "York", 6)}, nil},
+		{"spaces inside Value collapsed", "New  York", "New York", "New York", []model.Element{v170TestElement(t, "content", "New  ", "New  ", 1), v170TestElement(t, "content", "York", "York", 6)}, nil},
+		{"tab gap normalized", "A\tB", "A B", "A B", []model.Element{v170TestElement(t, "content", "A", "A", 1), v170TestElement(t, "content", "B", "B", 3)}, nil},
+		{"punctuation removed", "Yes!", "Yes", "Yes", []model.Element{v170TestElement(t, "content", "Y", "Y", 1), v170TestElement(t, "content", "es", "es", 2), v170TestElement(t, "content", "!", "!", 4)}, nil},
+		{"final sigma differs", "Σx", "ςX", "ςX", []model.Element{v170TestElement(t, "content", "Σ", "Σ", 1), v170TestElement(t, "content", "x", "x", 2)}, []v170Want{{primary: [3]int{5, 9, 11}}}},
 		{"no Unicode normalization", "e\u0301", "é", "é", []model.Element{v170TestElement(t, "content", "e", "e", 1), v170TestElement(t, "content", "\u0301", "\u0301", 2)}, []v170Want{{primary: [3]int{5, 9, 10}}}},
 		{"escaped values not decoded again", `\\\{`, `\{`, "{", []model.Element{v170TestElement(t, "content", `\\`, `\`, 1), v170TestElement(t, "content", `\{`, "{", 3)}, []v170Want{{primary: [3]int{5, 9, 11}}}},
 		{"escaped initial marker", `\@x`, "@x", "@x", []model.Element{v170TestElement(t, "content", `\@`, "@", 1), v170TestElement(t, "content", "x", "x", 3)}, nil},
@@ -348,12 +444,12 @@ func TestV170FragmentedAnswers(t *testing.T) {
 		{"adjacent matching", "Yes", "YES", "YES", []model.Element{v170TestElement(t, "content", "Y", "Y", 1), v170TestElement(t, "content", "es", "es", 2)}, 0, 0},
 		// Прежний тест ошибочно считал эти два готовых content неоднозначными.
 		{"single space gap", "A B", "Yes", "Yes", []model.Element{v170TestElement(t, "content", "A", "A", 1), v170TestElement(t, "content", "B", "B", 3)}, 12, 4},
-		{"spaces not collapsed", "New  York", "New York", "New York", []model.Element{v170TestElement(t, "content", "New", "New", 1), v170TestElement(t, "content", "York", "York", 6)}, 18, 10},
-		{"spaces inside Value retained", "New  York", "New York", "New York", []model.Element{v170TestElement(t, "content", "New  ", "New  ", 1), v170TestElement(t, "content", "York", "York", 6)}, 18, 10},
-		{"tab not replaced", "A\tB", "A B", "A B", []model.Element{v170TestElement(t, "content", "A", "A", 1), v170TestElement(t, "content", "B", "B", 3)}, 12, 4},
-		{"punctuation retained", "Yes!", "Yes", "Yes", []model.Element{v170TestElement(t, "content", "Yes", "Yes", 1), v170TestElement(t, "content", "!", "!", 4)}, 13, 5},
+		{"spaces collapsed", "New  York", "New York", "New York", []model.Element{v170TestElement(t, "content", "New", "New", 1), v170TestElement(t, "content", "York", "York", 6)}, 0, 0},
+		{"spaces inside Value collapsed", "New  York", "New York", "New York", []model.Element{v170TestElement(t, "content", "New  ", "New  ", 1), v170TestElement(t, "content", "York", "York", 6)}, 0, 0},
+		{"tab normalized", "A\tB", "A B", "A B", []model.Element{v170TestElement(t, "content", "A", "A", 1), v170TestElement(t, "content", "B", "B", 3)}, 0, 0},
+		{"punctuation removed", "Yes!", "Yes", "Yes", []model.Element{v170TestElement(t, "content", "Yes", "Yes", 1), v170TestElement(t, "content", "!", "!", 4)}, 0, 0},
 		{"escaped values not decoded again", `\\\{`, `\{`, "{", []model.Element{v170TestElement(t, "content", `\\`, `\`, 1), v170TestElement(t, "content", `\{`, "{", 3)}, 13, 5},
-		{"Unicode fold", "ςX", "Σx", "Σx", []model.Element{v170TestElement(t, "content", "ς", "ς", 1), v170TestElement(t, "content", "X", "X", 2)}, 0, 0},
+		{"final sigma differs", "ςX", "Σx", "Σx", []model.Element{v170TestElement(t, "content", "ς", "ς", 1), v170TestElement(t, "content", "X", "X", 2)}, 11, 3},
 		{"uncovered punctuation gap", "A!B", "Yes", "Yes", []model.Element{v170TestElement(t, "content", "A", "A", 1), v170TestElement(t, "content", "B", "B", 3)}, 0, 0},
 		{"uncovered trailing text", "Yes?", "No", "No", []model.Element{v170TestElement(t, "content", "Y", "Y", 1), v170TestElement(t, "content", "es", "es", 2)}, 0, 0},
 		{"empty annotations do not supply missing text", "Yes", "No", "No", []model.Element{v170TestElement(t, "content", "", "", 1), v170TestElement(t, "content", "", "", 3)}, 0, 0},
@@ -435,7 +531,7 @@ func TestV170FragmentedBlockAnswerGrouping(t *testing.T) {
 		v170TestLine(t, "Yes", "content", 5, 3, v170TestElement(t, "content", "Y", "Y", 1), v170TestElement(t, "content", "es", "es", 2)),
 		v170TestOpen(t, "hint", 5, 3), v170TestLine(t, "Hidden", "content", 11, 4, v170TestElement(t, "content", "H", "H", 1), v170TestElement(t, "content", "idden", "idden", 2)), v170TestClose(t, 11, 4),
 		v170TestClose(t, 5, 3), v170TestSeparator(t, "---", 3, 2), v170TestText(t, "Yes", "Yes", 3, 2), v170TestText(t, "YES", "YES", 3, 2))
-	v170TestRun(t, result, []v170Want{{primary: [3]int{6, 1, 3}, related: [][3]int{{7, 1, 3}, {8, 1, 3}}}, {primary: [3]int{9, 1, 6}}})
+	v170TestRun(t, result, []v170Want{{primary: [3]int{6, 1, 3}, related: [][3]int{{8, 1, 3}}}, {primary: [3]int{7, 1, 3}}, {primary: [3]int{9, 1, 6}}})
 }
 
 // v170TestFragmentedInline добавляет фиксированный префикс к заданным фрагментам.

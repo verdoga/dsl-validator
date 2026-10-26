@@ -144,7 +144,50 @@ func TestV157Grouping(t *testing.T) {
 		{"no options", nil, nil},
 		{"one option", []model.Line{answer("Spain")}, nil},
 	} {
-		t.Run(tc.name, func(t *testing.T) { v157Run(t, v157Block(t, "multichoice", tc.rows...), tc.want) })
+		t.Run(tc.name, func(t *testing.T) {
+			for _, block := range []string{"choice", "multichoice"} {
+				t.Run(block, func(t *testing.T) { v157Run(t, v157Block(t, block, tc.rows...), tc.want) })
+			}
+		})
+	}
+}
+
+func TestV157FullComparison(t *testing.T) {
+	for _, tc := range []struct {
+		name, answer, ordinary string
+		inline, block          []v157Expected
+	}{
+		{"Yes punctuation and case", "Yes!", "YES",
+			[]v157Expected{{[3]int{5, 1, 4}, [][3]int{{4, 9, 13}}}},
+			[]v157Expected{{[3]int{7, 1, 4}, [][3]int{{5, 1, 5}}}}},
+		{"long s is not folded to s", "ſ", "S", nil, nil},
+		{"identical single punctuation", "!", "!",
+			[]v157Expected{{[3]int{5, 1, 2}, [][3]int{{4, 9, 10}}}},
+			[]v157Expected{{[3]int{7, 1, 2}, [][3]int{{5, 1, 2}}}}},
+		{"different single punctuation", "!", "?", nil, nil},
+		{"collapse Unicode spaces again after punctuation removal", "a b", "a \t,\u00a0 b",
+			[]v157Expected{{[3]int{5, 1, 8}, [][3]int{{4, 9, 12}}}},
+			[]v157Expected{{[3]int{7, 1, 8}, [][3]int{{5, 1, 4}}}}},
+		{"digits remain significant", "a1", "a2", nil, nil},
+		{"diacritics remain significant", "é", "e", nil, nil},
+		{"primary empty answers do not match", " \u00a0", " \u2003", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, container := range []string{"choice", "multichoice"} {
+				t.Run(container, func(t *testing.T) {
+					t.Run("inline answer", func(t *testing.T) {
+						v157Run(t, v157Block(t, container,
+							v157Inline(t, "answer", tc.answer, tc.answer, 3, 2),
+							v157Text(t, tc.ordinary, tc.ordinary, 3, 2)), tc.inline)
+					})
+					t.Run("block answer", func(t *testing.T) {
+						v157Run(t, v157Block(t, container, v157Open(t, "answer", 3, 2),
+							v157Text(t, tc.answer, tc.answer, 4, 3), v157Close(t, 4, 3),
+							v157Text(t, tc.ordinary, tc.ordinary, 3, 2)), tc.block)
+					})
+				})
+			}
+		})
 	}
 }
 
@@ -163,6 +206,16 @@ func TestV157BlocksAndExclusions(t *testing.T) {
 		v157Run(t, v157Document(t,
 			v157Open(t, "choice", 2, 1), v157Inline(t, "answer", "Spain", "Spain", 3, 2), v157Text(t, "France", "France", 3, 2), v157Close(t, 3, 2),
 			v157Open(t, "multichoice", 2, 1), v157Inline(t, "answer", "Italy", "Italy", 7, 2), v157Text(t, "Spain", "Spain", 7, 2), v157Close(t, 7, 2)), nil)
+	})
+	t.Run("same conflicting label in separate blocks", func(t *testing.T) {
+		v157Run(t, v157Document(t,
+			v157Open(t, "choice", 2, 1), v157Inline(t, "answer", "Yes!", "Yes!", 3, 2),
+			v157Text(t, "YES", "YES", 3, 2), v157Close(t, 3, 2),
+			v157Open(t, "multichoice", 2, 1), v157Open(t, "answer", 7, 2),
+			v157Text(t, "YES", "YES", 8, 3), v157Close(t, 8, 3),
+			v157Text(t, "yes?", "yes?", 7, 2), v157Close(t, 7, 2)),
+			[]v157Expected{{[3]int{5, 1, 4}, [][3]int{{4, 9, 13}}},
+				{[3]int{11, 1, 5}, [][3]int{{9, 1, 4}}}})
 	})
 	t.Run("nested in variants", func(t *testing.T) {
 		// По 4.9.4–4.9.8 нужны две именованные ветви; choice принадлежит первой.
@@ -360,9 +413,13 @@ func TestV157CompositeContent(t *testing.T) {
 		blockLine := v157Line(t, "SPAIN!", "content", 6, 3,
 			v157Element(t, "content", "SPA", "SPA", 1), v157Element(t, "content", "", "", 2),
 			v157Element(t, "content", "IN!", "IN!", 4))
-		v157Run(t, v157Block(t, "multichoice", ordinary, inline, v157Open(t, "answer", 3, 2),
-			blockLine, v157Close(t, 6, 3), v157Text(t, "spain?", "spain?", 3, 2)),
-			[]v157Expected{{[3]int{5, 9, 14}, [][3]int{{4, 1, 6}, {7, 1, 7}, {9, 1, 7}}}})
+		for _, container := range []string{"choice", "multichoice"} {
+			t.Run(container, func(t *testing.T) {
+				v157Run(t, v157Block(t, container, ordinary, inline, v157Open(t, "answer", 3, 2),
+					blockLine, v157Close(t, 6, 3), v157Text(t, "spain?", "spain?", 3, 2)),
+					[]v157Expected{{[3]int{5, 9, 14}, [][3]int{{4, 1, 6}, {7, 1, 7}, {9, 1, 7}}}})
+			})
+		}
 	})
 }
 

@@ -2,7 +2,6 @@ package checkers
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -50,16 +49,27 @@ func checkV180(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if container.Type() != "block-start" || v180Tag(container, "ordering") == nil || !v180Linked(lines, number, parent) {
 			continue
 		}
-		values, complete := v180Values(answer, tag, children[number])
-		if !complete {
-			continue
+		values := v180Values(answer, tag, children[number])
+		type group struct {
+			value      string
+			occurrence int
 		}
-		occurrences := make(map[string]int)
+		var groups []group
 		for _, text := range values {
-			if v180Empty(text.value) || v180Number(text.value) {
+			if answerPrimary(text.value) == "" {
 				continue
 			}
-			if occurrence, found := occurrences[text.value]; found {
+			if _, valid := answerPosition(text.value); valid {
+				continue
+			}
+			occurrence := -1
+			for _, previous := range groups {
+				if answerEqual(previous.value, text.value) {
+					occurrence = previous.occurrence
+					break
+				}
+			}
+			if occurrence >= 0 {
 				if err := findings.AddRelated(occurrence, text.line, text.start, text.line, text.end); err != nil {
 					return err
 				}
@@ -69,7 +79,7 @@ func checkV180(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			if err != nil {
 				return err
 			}
-			occurrences[text.value] = occurrence
+			groups = append(groups, group{text.value, occurrence})
 		}
 	}
 	return nil
@@ -89,35 +99,38 @@ func v180Linked(lines diagnostics.Lines, answer, container int) bool {
 	return false
 }
 
-// v180Values собирает все значения до выдачи сообщений. complete=false
-// исключает весь answer, включая ранее прочитанные строки. Потомки глубже
-// непосредственных строк не входят ни в значения, ни в проверку их полноты.
-func v180Values(answer diagnostics.Line, tag diagnostics.Element, rows []diagnostics.Line) (values []v180Text, complete bool) {
+// v180Values собирает известные альтернативы непосредственных строк answer.
+// Неопределимость одной альтернативы не исключает остальные; более глубокие
+// потомки не входят в значения.
+func v180Values(answer diagnostics.Line, tag diagnostics.Element, rows []diagnostics.Line) (values []v180Text) {
 	if v180Uncertain(answer) {
-		return nil, false
+		return nil
 	}
 	if answer.Type() == "tag" {
 		text, ok := v180Value(answer, tag.End()-1, false)
-		return []v180Text{text}, ok
+		if ok {
+			return []v180Text{text}
+		}
+		return nil
 	}
 	for _, line := range rows {
 		if v180Uncertain(line) {
-			return nil, false
+			continue
 		}
 		if line.Type() != "content" || v180Element(line, "tag") != nil {
 			continue
 		}
 		text, ok := v180Value(line, 0, true)
-		if !ok {
-			return nil, false
+		if ok {
+			values = append(values, text)
 		}
-		values = append(values, text)
 	}
-	return values, true
+	return values
 }
 
-// v180Value использует полное Value без декодирования. При отсутствии content
-// восстанавливает однозначный текст Raw; частичное покрытие content не склеивает.
+// v180Value соединяет content.Value без повторного декодирования, сохраняя
+// пробельные промежутки Raw. Непокрытый непробельный текст делает значение
+// неизвестным; при полном отсутствии content используется однократный decode.
 // start — индекс руны начала содержимого, initial разрешает начальные \@ и \#.
 func v180Value(line diagnostics.Line, start int, initial bool) (v180Text, bool) {
 	raw := []rune(line.Raw())
@@ -129,21 +142,43 @@ func v180Value(line diagnostics.Line, start int, initial bool) (v180Text, bool) 
 		end--
 	}
 	text := v180Text{line: line.Number(), start: start + 1, end: end + 1}
-	var content diagnostics.Element
+	var value strings.Builder
+	cursor := start
+	hasContent := false
 	for index := 0; index < line.ElementCount(); index++ {
 		element, _ := line.Element(index)
 		if element.Type() != "content" {
 			continue
 		}
-		if content != nil || element.Start()-1 > start || element.End()-1 < end {
+		hasContent = true
+		part, present := element.Value()
+		if !present {
 			return text, false
 		}
-		content = element
+		// Пустая отметка не занимает исходник, в том числе внутри фрагмента.
+		if element.Start() == element.End() && part == "" {
+			continue
+		}
+		if gapEnd := min(element.Start()-1, end); gapEnd > cursor {
+			gap := string(raw[cursor:gapEnd])
+			if strings.TrimSpace(gap) != "" {
+				return text, false
+			}
+			value.WriteString(gap)
+		}
+		value.WriteString(part)
+		cursor = max(cursor, element.End()-1)
 	}
-	if content != nil {
-		value, present := content.Value()
-		text.value = strings.Trim(value, " \t")
-		return text, present
+	if hasContent {
+		if cursor < end {
+			gap := string(raw[cursor:end])
+			if strings.TrimSpace(gap) != "" {
+				return text, false
+			}
+			value.WriteString(gap)
+		}
+		text.value = value.String()
+		return text, true
 	}
 	text.value = v180Decode(raw[start:end], initial)
 	return text, true
@@ -167,31 +202,7 @@ func v180Decode(raw []rune, initial bool) string {
 	return text.String()
 }
 
-// v180Empty исключает пустые и целиком пробельные ответы по DSL 4.1.8.
-// Пробелы в непустых значениях не удаляются и не сворачиваются.
-func v180Empty(value string) bool {
-	for _, char := range value {
-		if !unicode.Is(unicode.White_Space, char) {
-			return false
-		}
-	}
-	return true
-}
-
-// v180Number проверяет [1-9][0-9]* без числового преобразования и верхней границы.
-func v180Number(value string) bool {
-	if value == "" || value[0] < '1' || value[0] > '9' {
-		return false
-	}
-	for index := 1; index < len(value); index++ {
-		if value[index] < '0' || value[index] > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// v180Uncertain сообщает о неразобранном участке, исключающем проверку answer.
+// v180Uncertain сообщает о неразобранном участке проверяемой альтернативы.
 func v180Uncertain(line diagnostics.Line) bool {
 	return line.Type() == "invalid" || v180Element(line, "unparsed") != nil
 }
