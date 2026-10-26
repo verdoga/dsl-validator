@@ -2,7 +2,6 @@ package checkers
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -119,8 +118,8 @@ func v152AnswerEnd(raw []rune, opening int) (end int, valid bool) {
 	return 0, false
 }
 
-// v152Normalize снимает разрешённое экранирование, меняет регистр и нормализует пробелы.
-// Unicode White_Space сжимается до U+0020 без краевых пробелов; пунктуация сохраняется.
+// v152Normalize однократно снимает разрешённое экранирование
+// и приводит ответ к основной форме с сохранением пунктуации.
 func v152Normalize(raw []rune) string {
 	var decoded strings.Builder
 	for i := 0; i < len(raw); i++ {
@@ -129,8 +128,5 @@ func v152Normalize(raw []rune) string {
 		}
 		decoded.WriteRune(raw[i])
 	}
-	lower := strings.ToLower(decoded.String())
-	return strings.Join(strings.FieldsFunc(lower, func(r rune) bool {
-		return unicode.Is(unicode.White_Space, r)
-	}), " ")
+	return answerPrimary(decoded.String())
 }

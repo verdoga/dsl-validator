@@ -53,15 +53,21 @@ func TestV184MaximumMatching(t *testing.T) {
 		want  []v184Expected
 	}{
 		{"minimal conflict", []v184TestItem{{"A", []string{"1"}, true}, {"B", []string{"1"}, true}}, []v184Expected{{3, 1, 8, 2, 1, 2}}},
+		{"normalized conflict", []v184TestItem{{"A", []string{"1"}, true}, {"B", []string{"1."}, true}}, []v184Expected{{3, 1, 8, 2, 1, 2}}},
 		{"complete", []v184TestItem{{"A", []string{"1"}, true}, {"B", []string{"2"}, true}}, nil},
+		{"normalized complete", []v184TestItem{{"A", []string{"1."}, true}, {"B", []string{"2!"}, true}}, nil},
+		{"normalized audit conflict", []v184TestItem{{"A", []string{"1"}, true}, {"B", []string{"1."}, true}, {"C", []string{"2", "3."}, false}}, []v184Expected{{3, 1, 13, 2, 2, 3}}},
 		{"one item", []v184TestItem{{"A", []string{"1"}, true}}, nil},
 		{"duplicate number", []v184TestItem{{"A", []string{"1", "1"}, false}, {"B", []string{"1"}, true}}, []v184Expected{{3, 1, 11, 2, 1, 2}}},
+		{"duplicate normalized edges conflict", []v184TestItem{{"A", []string{"1", "1.", "(1)", "«1»"}, false}, {"B", []string{"1!"}, true}}, []v184Expected{{3, 1, 13, 2, 1, 2}}},
 		{"identical labels conflict", []v184TestItem{{"A", []string{"1"}, true}, {"A", []string{"1"}, true}}, []v184Expected{{3, 1, 8, 2, 1, 2}}},
 		{"identical labels different sets", []v184TestItem{{"A", []string{"1"}, true}, {"A", []string{"2"}, true}}, nil},
+		{"identical labels normalized different sets", []v184TestItem{{"A", []string{"1.", "2!"}, false}, {"A", []string{"(1)"}, true}}, nil},
 		{"one reachable position", []v184TestItem{{"A", []string{"1"}, false}, {"B", []string{"1"}, false}, {"C", []string{"1"}, false}}, []v184Expected{{3, 1, 16, 2, 1, 3}}},
 		{"two reachable positions", []v184TestItem{{"A", []string{"1", "2"}, false}, {"B", []string{"1", "2"}, false}, {"C", []string{"1", "2"}, false}}, []v184Expected{{3, 1, 19, 2, 2, 3}}},
 		{"two deficient components", []v184TestItem{{"A", []string{"1"}, false}, {"B", []string{"1"}, false}, {"C", []string{"3"}, false}, {"D", []string{"3"}, false}}, []v184Expected{{3, 1, 20, 2, 2, 4}}},
 		{"duplicate positions still allow full matching", []v184TestItem{{"A", []string{"1", "1", "2"}, false}, {"B", []string{"1", "1"}, false}}, nil},
+		{"duplicate normalized edges allow full matching", []v184TestItem{{"A", []string{"1", "1.", "2!"}, false}, {"B", []string{"(1)", "1!"}, false}}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) { v184TestRun(t, v184TestItems(t, tc.items...), "current", tc.want) })
 	}
@@ -128,7 +134,7 @@ func TestV184AssociationAndExclusions(t *testing.T) {
 }
 
 func TestV184AnswerValues(t *testing.T) {
-	for _, value := range []string{"0", "01", "+1", "-1", "1.0", "1 2", "1\t2", "١", "１", `\1`, "\u00a01", "1\u00a0", "3", "999999999999999999999999999999"} {
+	for _, value := range []string{"0", "01", "+1", "−1", "1.0", "1 2", "1\t2", "1\u00a02", "١", "１", "(01)", "(0)", "(!)", "\u00a0\t", "3", "3!", "999999999999999999999999999999", "999999999999999999999999999999."} {
 		for _, inline := range []bool{true, false} {
 			t.Run(strconv.Quote(value)+"/inline="+strconv.FormatBool(inline), func(t *testing.T) {
 				result := v184TestItems(t, v184TestItem{"A", []string{value}, inline}, v184TestItem{"B", []string{"1"}, true})
@@ -146,6 +152,10 @@ func TestV184AnswerValues(t *testing.T) {
 		{"only blanks", []model.Line{v184TestBlank(t, "", 5, 3), v184TestBlank(t, " \t", 5, 3)}, nil, 5},
 		{"blank beside valid number", []model.Line{v184TestText(t, "1", "1", 5, 3), v184TestBlank(t, "", 5, 3)}, []v184Expected{{3, 1, 11, 2, 1, 2}}, 0},
 		{"ASCII blank beside valid number", []model.Line{v184TestBlank(t, " \t", 5, 3), v184TestText(t, "1", "1", 5, 3)}, []v184Expected{{3, 1, 11, 2, 1, 2}}, 0},
+		{"content whitespace without elements cancels graph", []model.Line{v184TestText(t, "1", "1", 5, 3), v184TestLine(t, " \t", "content", 5, 3)}, nil, 0},
+		{"blank with content whitespace preserves conflict", []model.Line{v184TestLine(t, " \t", "blank", 5, 3, v184TestElement(t, "content", " \t", " \t", 1, 3)), v184TestText(t, "1", "1", 5, 3)}, []v184Expected{{3, 1, 11, 2, 1, 2}}, 0},
+		{"empty decoded content cancels graph", []model.Line{v184TestText(t, "1", "1", 5, 3), v184TestText(t, "\\", "", 5, 3)}, nil, 0},
+		{"empty content beside valid number cancels graph", []model.Line{v184TestText(t, "1", "1", 5, 3), v184TestText(t, "", "", 5, 3)}, nil, 0},
 		{"valid then invalid", []model.Line{v184TestText(t, "1", "1", 5, 3), v184TestText(t, "01", "01", 5, 3)}, nil, 0},
 		{"invalid then valid", []model.Line{v184TestText(t, "01", "01", 5, 3), v184TestText(t, "1", "1", 5, 3)}, nil, 0},
 		{"valid then unknown", []model.Line{v184TestText(t, "1", "1", 5, 3), v184TestInvalid(t, "@unknown", 5, 3)}, nil, 0},
@@ -184,6 +194,70 @@ func TestV184AnswerValues(t *testing.T) {
 	})
 }
 
+func TestV184AnswerNormalization(t *testing.T) {
+	for _, value := range []string{"1.", "(1)", "-1", `\1`, "«—1»", "\u00a01", "1\u00a0", "\u202f\t1!\u2003", "(\u00a01\u3000)"} {
+		for _, inline := range []bool{true, false} {
+			t.Run(strconv.Quote(value)+"/inline="+strconv.FormatBool(inline), func(t *testing.T) {
+				endLine := 8
+				if !inline {
+					endLine = 10
+				}
+				result := v184TestItems(t, v184TestItem{"A", []string{value}, inline}, v184TestItem{"B", []string{"1"}, true})
+				v184TestRun(t, result, "current", []v184Expected{{3, 1, endLine, 2, 1, 2}})
+			})
+		}
+	}
+	t.Run("normalized multi digit number is checked against item count", func(t *testing.T) {
+		var items []v184TestItem
+		for i := 0; i < 10; i++ {
+			items = append(items, v184TestItem{"A", []string{"1.0!"}, true})
+		}
+		v184TestRun(t, v184TestItems(t, items...), "current", []v184Expected{{3, 1, 24, 2, 1, 10}})
+	})
+	for _, tc := range []struct {
+		name, raw, value string
+		want             []v184Expected
+	}{
+		{"decoded value is normalized", `\u0031.`, "1.", []v184Expected{{3, 1, 10, 2, 1, 2}}},
+		{"decoded value is not decoded again", `\\u0031`, `\u0031`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := v184TestOrdering(t, v184TestText(t, "A", "A", 3, 2), v184TestOpen(t, "answer", 3, 2),
+				v184TestText(t, tc.raw, tc.value, 5, 3), v184TestClose(t, 5, 3), v184TestText(t, "B", "B", 3, 2), v184TestTag(t, "answer", "content", "1", 3, 2))
+			v184TestRun(t, result, "current", tc.want)
+		})
+	}
+}
+
+func TestV184UnusableAlternativeSuppressesWholeGraph(t *testing.T) {
+	placeholder := v184TestElement(t, "placeholder", "_____", "", 1, 6)
+	placeholder.Value = nil
+	for _, tc := range []struct {
+		name   string
+		values []model.Line
+	}{
+		{"no alternatives", nil},
+		{"only physical blanks", []model.Line{v184TestBlank(t, " \t", 9, 3)}},
+		{"unknown after valid", []model.Line{v184TestText(t, "2", "2", 9, 3), v184TestText(t, "unknown", "unknown", 9, 3)}},
+		{"unknown before valid", []model.Line{v184TestText(t, "unknown", "unknown", 9, 3), v184TestText(t, "2", "2", 9, 3)}},
+		{"out of range after valid", []model.Line{v184TestText(t, "2", "2", 9, 3), v184TestText(t, "4!", "4!", 9, 3)}},
+		{"empty after valid", []model.Line{v184TestText(t, "2", "2", 9, 3), v184TestText(t, "", "", 9, 3)}},
+		{"Unicode whitespace after valid", []model.Line{v184TestText(t, "2", "2", 9, 3), v184TestText(t, "\u00a0\u2003", "\u00a0\u2003", 9, 3)}},
+		{"unparsed after valid", []model.Line{v184TestText(t, "2", "2", 9, 3), v184TestInvalid(t, "???", 9, 3)}},
+		{"unparsed before valid", []model.Line{v184TestInvalid(t, "???", 9, 3), v184TestText(t, "2", "2", 9, 3)}},
+		{"unresolved after valid", []model.Line{v184TestText(t, "2", "2", 9, 3), v184TestLine(t, "_____", "content", 9, 3, placeholder)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A и B уже конфликтуют; непригодная альтернатива C отменяет весь вывод.
+			rows := []model.Line{v184TestText(t, "A", "A", 3, 2), v184TestTag(t, "answer", "content", "1", 3, 2),
+				v184TestText(t, "B", "B", 3, 2), v184TestTag(t, "answer", "content", "1.", 3, 2), v184TestText(t, "C", "C", 3, 2), v184TestOpen(t, "answer", 3, 2)}
+			rows = append(rows, tc.values...)
+			rows = append(rows, v184TestClose(t, 9, 3))
+			v184TestRun(t, v184TestOrdering(t, rows...), "current", nil)
+		})
+	}
+}
+
 func TestV184SeparatorsAndRanges(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -201,6 +275,12 @@ func TestV184SeparatorsAndRanges(t *testing.T) {
 			v184TestRun(t, v184TestOrdering(t, rows...), "current", nil)
 		})
 	}
+	t.Run("normalized conflict in extended ordering is excluded", func(t *testing.T) {
+		result := v184TestOrdering(t, v184TestText(t, "A", "A", 3, 2), v184TestTag(t, "answer", "content", "1", 3, 2),
+			v184TestText(t, "B", "B", 3, 2), v184TestTag(t, "answer", "content", "1.", 3, 2), v184TestLine(t, "---", "separator", 3, 2),
+			v184TestText(t, "First", "First", 3, 2), v184TestText(t, "Last", "Last", 3, 2))
+		v184TestRun(t, result, "current", nil)
+	})
 	t.Run("escaped separator item", func(t *testing.T) {
 		result := v184TestOrdering(t, v184TestText(t, "A", "A", 3, 2), v184TestTag(t, "answer", "content", "1", 3, 2), v184TestText(t, `\---`, "---", 3, 2), v184TestTag(t, "answer", "content", "1", 3, 2))
 		v184TestRun(t, result, "current", []v184Expected{{3, 1, 8, 2, 1, 2}})

@@ -47,7 +47,7 @@ func checkV171(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			}
 			rows = append(rows, line)
 		}
-		if count != 1 || !v171Automatic(rows[:separator]) {
+		if count != 1 || !v171Automatic(lines, rows[:separator]) {
 			continue
 		}
 		var groups [][]v171Label
@@ -56,12 +56,12 @@ func checkV171(lines diagnostics.Lines, findings diagnostics.Findings) error {
 				continue
 			}
 			label, known := v171Text(row)
-			if !known {
+			if !known || answerPrimary(label.text) == "" {
 				continue
 			}
 			group := -1
 			for index := range groups {
-				if strings.EqualFold(groups[index][0].text, label.text) {
+				if answerEqual(groups[index][0].text, label.text) {
 					group = index
 					break
 				}
@@ -94,10 +94,10 @@ func checkV171(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	return nil
 }
 
-// v171Automatic требует ответ сразу после каждого обычного верхнего элемента.
-// Строки тел блоков сюда не входят. Подсказка сохраняет связь с ответом,
-// посторонняя конструкция её обрывает, а повторный ответ отменяет применимость.
-func v171Automatic(rows []diagnostics.Line) bool {
+// v171Automatic требует полные связи каждого верхнего элемента с ответом,
+// все альтернативы которого известны и непусты после основной нормализации.
+// После ответа допускается одна подсказка; тела блоков сюда не входят.
+func v171Automatic(lines diagnostics.Lines, rows []diagnostics.Line) bool {
 	items, pending, answered := 0, false, false
 	for _, row := range rows {
 		if strings.Trim(row.Raw(), " \t") == "" {
@@ -113,22 +113,44 @@ func v171Automatic(rows []diagnostics.Line) bool {
 		}
 		name := v171Tag(row)
 		if name == "answer" {
-			if answered {
+			if !pending || !v171AnswerAvailable(lines, row) {
 				return false
 			}
-			if pending {
-				pending, answered = false, true
-			}
+			pending, answered = false, true
 			continue
 		}
-		if pending {
-			return false
-		}
-		if name != "hint" {
+		if name == "hint" && answered && (row.Type() == "tag" || row.Type() == "block-start") {
 			answered = false
+			continue
 		}
+		return false
 	}
 	return items > 0 && !pending
+}
+
+// v171AnswerAvailable проверяет каждую текстовую альтернативу связанного answer.
+// Вложенные теги не создают альтернатив; неизвестная текстовая строка
+// или пустая основная форма хотя бы одной альтернативы отменяет проверку.
+func v171AnswerAvailable(lines diagnostics.Lines, answer diagnostics.Line) bool {
+	if answer.Type() == "tag" {
+		value, known := v170Text(answer, true, false)
+		return known && answerPrimary(value.text) != ""
+	}
+	if answer.Type() != "block-start" {
+		return false
+	}
+	found := false
+	for _, row := range v170Children(lines, answer) {
+		if row.Type() != "content" && (row.Type() != "invalid" || v171Tag(row) != "") {
+			continue
+		}
+		value, known := v170Text(row, false, false)
+		if !known || answerPrimary(value.text) == "" {
+			return false
+		}
+		found = true
+	}
+	return found
 }
 
 // v171Text использует Value, только если content охватывает всю подпись.

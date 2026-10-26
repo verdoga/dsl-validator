@@ -54,9 +54,18 @@ func TestV181Numbers(t *testing.T) {
 		want  []v181Expected
 	}{
 		{"1", nil}, {"2", nil}, {"3", []v181Expected{{5, 9, 10, "2", nil}}},
+		{"1.", nil}, {"(2)", nil}, {"-2", nil}, {"\u00a02\u00a0", nil},
+		{"3.", []v181Expected{{5, 9, 11, "2", nil}}},
+		{"(3)", []v181Expected{{5, 9, 12, "2", nil}}},
+		{"-3", []v181Expected{{5, 9, 11, "2", nil}}},
+		{"3.0", []v181Expected{{5, 9, 12, "2", nil}}},
+		{`\3`, []v181Expected{{5, 9, 11, "2", nil}}},
+		{"\u00a03", []v181Expected{{5, 9, 11, "2", nil}}},
+		{"3\u00a0", []v181Expected{{5, 9, 11, "2", nil}}},
+		{"\u00a03\u00a0", []v181Expected{{5, 9, 12, "2", nil}}},
 		{"999999999999999999999999999999", []v181Expected{{5, 9, 39, "2", nil}}},
-		{"0", nil}, {"03", nil}, {"+3", nil}, {"-3", nil}, {"3.0", nil}, {"3 4", nil}, {"3\t4", nil},
-		{"٣", nil}, {"３", nil}, {`\3`, nil}, {"\u00a03", nil}, {"3\u00a0", nil}, {"3e2", nil}, {"", nil},
+		{"0", nil}, {"03", nil}, {"+3", nil}, {"3 4", nil}, {"3\t4", nil},
+		{"٣", nil}, {"３", nil}, {"3e2", nil}, {"", nil},
 	} {
 		t.Run(strconv.Quote(tc.value), func(t *testing.T) {
 			result := v181TestBase(t, tc.value, "2")
@@ -74,6 +83,8 @@ func TestV181Numbers(t *testing.T) {
 		{9, "10", []v181Expected{{13, 9, 11, "9", nil}}},
 		{10, "11", []v181Expected{{14, 9, 11, "10", nil}}},
 		{10, "10", nil}, {10, "9", nil},
+		{3, "3.", nil}, {3, "(3)", nil}, {3, "-3", nil}, {3, "\u00a03\u00a0", nil},
+		{29, "3.0", []v181Expected{{33, 9, 12, "29", nil}}}, {30, "3.0", nil},
 	} {
 		t.Run(fmt.Sprintf("N=%d answer=%s", tc.count, tc.value), func(t *testing.T) {
 			var rows []model.Line
@@ -86,9 +97,9 @@ func TestV181Numbers(t *testing.T) {
 	}
 	t.Run("source indentation", func(t *testing.T) {
 		result := v181TestOrdering(t, v181TestText(t, "A", "A", 3, 2),
-			v181TestLine(t, " \t@answer 3 \t", "tag", 3, 2, v181TestElement(t, "tag", "@answer", "answer", 3, 10), v181TestElement(t, "content", "3", "3", 11, 12)),
+			v181TestLine(t, " \t@answer (3) \t", "tag", 3, 2, v181TestElement(t, "tag", "@answer", "answer", 3, 10), v181TestElement(t, "content", "(3)", "(3)", 11, 14)),
 			v181TestText(t, "B", "B", 3, 2), v181TestTag(t, "answer", "content", "2", 3, 2))
-		v181TestRun(t, result, "current", []v181Expected{{5, 11, 12, "2", nil}})
+		v181TestRun(t, result, "current", []v181Expected{{5, 11, 14, "2", nil}})
 	})
 }
 
@@ -101,7 +112,10 @@ func TestV181ItemsAndAssociation(t *testing.T) {
 	}{
 		{"one element", []model.Line{v181TestText(t, "A", "A", 3, 2), v181TestTag(t, "answer", "content", "2", 3, 2)}, []v181Expected{{5, 9, 10, "1", nil}}, 0},
 		{"duplicate elements", []model.Line{v181TestText(t, "A", "A", 3, 2), v181TestTag(t, "answer", "content", "3", 3, 2), v181TestText(t, "A", "A", 3, 2), v181TestTag(t, "answer", "content", "2", 3, 2)}, []v181Expected{{5, 9, 10, "2", nil}}, 0},
+		{"duplicate elements accept second position", []model.Line{v181TestText(t, "A", "A", 3, 2), v181TestTag(t, "answer", "content", "(2)", 3, 2), v181TestText(t, "A", "A", 3, 2)}, nil, 0},
 		{"partial answers", []model.Line{v181TestText(t, "A", "A", 3, 2), v181TestTag(t, "answer", "content", "3", 3, 2), v181TestText(t, "B", "B", 3, 2)}, []v181Expected{{5, 9, 10, "2", nil}}, 0},
+		{"partial normalized answer", []model.Line{v181TestText(t, "A", "A", 3, 2), v181TestTag(t, "answer", "content", "(3)", 3, 2), v181TestText(t, "B", "B", 3, 2)}, []v181Expected{{5, 9, 12, "2", nil}}, 0},
+		{"partial valid normalized answer", []model.Line{v181TestText(t, "A", "A", 3, 2), v181TestTag(t, "answer", "content", "(2)", 3, 2), v181TestText(t, "B", "B", 3, 2)}, nil, 0},
 		{"no answers", []model.Line{v181TestText(t, "A", "A", 3, 2), v181TestText(t, "B", "B", 3, 2)}, nil, 0},
 		{"no elements", nil, nil, 3},
 		{"orphan", []model.Line{v181TestTag(t, "answer", "content", "3", 3, 2), v181TestText(t, "A", "A", 3, 2), v181TestText(t, "B", "B", 3, 2)}, nil, 4},
@@ -128,15 +142,21 @@ func TestV181ItemsAndAssociation(t *testing.T) {
 }
 
 func TestV181BlockAnswers(t *testing.T) {
+	huge := strings.Repeat("9", 256)
 	for _, tc := range []struct {
 		name   string
 		values []model.Line
 		want   []v181Expected
 	}{
 		{"groups", []model.Line{v181TestText(t, "3", "3", 5, 3), v181TestText(t, "3", "3", 5, 3), v181TestText(t, "4", "4", 5, 3)}, []v181Expected{{6, 1, 2, "2", [][3]int{{7, 1, 2}}}, {8, 1, 2, "2", nil}}},
+		{"normalized groups", []model.Line{v181TestText(t, "3.", "3.", 5, 3), v181TestText(t, "(3)", "(3)", 5, 3), v181TestText(t, "-3", "-3", 5, 3), v181TestText(t, "\u00a03\u00a0", "\u00a03\u00a0", 5, 3), v181TestText(t, "3", "3", 5, 3)}, []v181Expected{{6, 1, 3, "2", [][3]int{{7, 1, 4}, {8, 1, 3}, {9, 1, 4}, {10, 1, 2}}}}},
+		{"normalized interleaved groups", []model.Line{v181TestText(t, "3.0", "3.0", 5, 3), v181TestText(t, "3.", "3.", 5, 3), v181TestText(t, "(30)", "(30)", 5, 3), v181TestText(t, "30", "30", 5, 3), v181TestText(t, "(3)", "(3)", 5, 3)}, []v181Expected{{6, 1, 4, "2", [][3]int{{8, 1, 5}, {9, 1, 3}}}, {7, 1, 3, "2", [][3]int{{10, 1, 4}}}}},
+		{"huge normalized groups", []model.Line{v181TestText(t, huge, huge, 5, 3), v181TestText(t, "("+huge+")", "("+huge+")", 5, 3), v181TestText(t, huge+"0", huge+"0", 5, 3)}, []v181Expected{{6, 1, 257, "2", [][3]int{{7, 1, 259}}}, {8, 1, 258, "2", nil}}},
 		{"blank before groups", []model.Line{v181TestBlank(t, "", 5, 3), v181TestText(t, "3", "3", 5, 3), v181TestText(t, "3", "3", 5, 3), v181TestText(t, "4", "4", 5, 3)}, []v181Expected{{7, 1, 2, "2", [][3]int{{8, 1, 2}}}, {9, 1, 2, "2", nil}}},
 		{"valid alternatives", []model.Line{v181TestText(t, "1", "1", 5, 3), v181TestText(t, "2", "2", 5, 3)}, nil},
+		{"valid normalized alternatives", []model.Line{v181TestText(t, "1.", "1.", 5, 3), v181TestText(t, "(2)", "(2)", 5, 3), v181TestText(t, "-2", "-2", 5, 3), v181TestText(t, "\u00a02\u00a0", "\u00a02\u00a0", 5, 3)}, nil},
 		{"invalid syntax not merged", []model.Line{v181TestText(t, "3", "3", 5, 3), v181TestText(t, "03", "03", 5, 3), v181TestText(t, "3", "3", 5, 3)}, []v181Expected{{6, 1, 2, "2", [][3]int{{8, 1, 2}}}}},
+		{"unrecognized forms not checked or merged", []model.Line{v181TestText(t, "3.", "3.", 5, 3), v181TestText(t, "+3", "+3", 5, 3), v181TestText(t, "03", "03", 5, 3), v181TestText(t, "(3)", "(3)", 5, 3)}, []v181Expected{{6, 1, 3, "2", [][3]int{{9, 1, 4}}}}},
 		{"interleaved groups", []model.Line{v181TestText(t, "3", "3", 5, 3), v181TestText(t, "4", "4", 5, 3), v181TestText(t, "3", "3", 5, 3), v181TestText(t, "4", "4", 5, 3)}, []v181Expected{{6, 1, 2, "2", [][3]int{{8, 1, 2}}}, {7, 1, 2, "2", [][3]int{{9, 1, 2}}}}},
 		{"unknown value", []model.Line{v181TestInvalid(t, "@unknown", 5, 3)}, nil},
 		{"known value beside unknown", []model.Line{v181TestText(t, "3", "3", 5, 3), v181TestInvalid(t, "@unknown", 5, 3)}, []v181Expected{{6, 1, 2, "2", nil}}},
@@ -150,6 +170,9 @@ func TestV181BlockAnswers(t *testing.T) {
 	}
 	t.Run("separate answers", func(t *testing.T) {
 		v181TestRun(t, v181TestBase(t, "3", "3"), "current", []v181Expected{{5, 9, 10, "2", nil}, {7, 9, 10, "2", nil}})
+	})
+	t.Run("separate normalized answers", func(t *testing.T) {
+		v181TestRun(t, v181TestBase(t, "3.", "(3)"), "current", []v181Expected{{5, 9, 11, "2", nil}, {7, 9, 12, "2", nil}})
 	})
 	t.Run("deeper value excluded", func(t *testing.T) {
 		result := v181TestOrdering(t, v181TestText(t, "A", "A", 3, 2), v181TestOpen(t, "answer", 3, 2), v181TestOpen(t, "note", 5, 3), v181TestText(t, "3", "3", 6, 4),

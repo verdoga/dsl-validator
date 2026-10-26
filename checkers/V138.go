@@ -2,30 +2,29 @@ package checkers
 
 import (
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
 
-// registrationV138 регистрирует запрет пустых строк в блочном answer для DSL 1.2.
+// registrationV138 регистрирует проверку пустых значений в блочном answer для DSL 1.2.
 func registrationV138(registry *diagnostics.Registry) error {
 	return registry.Register(diagnostics.Definition{
 		Code:     "V138",
 		Severity: diagnostics.SeverityError,
-		Message:  "В блоке @answer есть пустая строка.",
+		Message:  "В блоке @answer указано пустое значение ответа.",
 		Scope:    diagnostics.ScopeBlock,
 		Versions: diagnostics.VersionRule{Mode: diagnostics.VersionExact, Version: "1.2"},
 		Check:    checkV138,
 	})
 }
 
-// checkV138 проверяет собственные текстовые строки каждого answer независимо.
-// Соседние пустые строки не объединяются, конкретизация не добавляется.
+// checkV138 проверяет непосредственные content-строки каждого answer независимо.
+// Строки blank игнорируются; конкретизация не добавляется.
 func checkV138(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
-		if line.Type() != "blank" && line.Type() != "content" {
+		if line.Type() != "content" {
 			continue
 		}
 		parentNumber, found := line.ParentLine()
@@ -37,7 +36,7 @@ func checkV138(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			continue
 		}
 		value, known := v138Text(line)
-		if !known || v138Normalize(value) != "" {
+		if !known || answerPrimary(value) != "" {
 			continue
 		}
 		startLine, startColumn, endLine, endColumn := number, 1, number+1, 1
@@ -70,12 +69,11 @@ func v138Answer(line diagnostics.Line) bool {
 }
 
 // v138Text получает текст одной строки, не снимая экранирование повторно.
-// true означает известное значение; отсутствие разбора не доказывает пустоту.
-// Обычная blank может не иметь элементов: её Raw содержит только пробелы и табы.
+// true означает известное значение; значимые непокрытые участки Raw и
+// отсутствие разбора не доказывают пустоту. Пробельные промежутки сохраняются.
 func v138Text(line diagnostics.Line) (string, bool) {
-	if line.Type() == "blank" {
-		return line.Raw(), true
-	}
+	raw := []rune(line.Raw())
+	end := 0
 	var text strings.Builder
 	for index := 0; index < line.ElementCount(); index++ {
 		element, _ := line.Element(index)
@@ -83,15 +81,23 @@ func v138Text(line diagnostics.Line) (string, bool) {
 		if element.Type() != "content" || !present {
 			return "", false
 		}
+		// Нулевой content не покрывает Raw и не сдвигает известную границу.
+		if element.Start() != element.End() {
+			if start := element.Start() - 1; start > end {
+				gap := string(raw[end:start])
+				if answerPrimary(gap) != "" {
+					return "", false
+				}
+				text.WriteString(gap)
+			}
+			end = element.End() - 1
+		}
 		text.WriteString(value)
 	}
+	tail := string(raw[end:])
+	if answerPrimary(tail) != "" {
+		return "", false
+	}
+	text.WriteString(tail)
 	return text.String(), line.ElementCount() != 0
-}
-
-// v138Normalize сжимает Unicode White_Space до U+0020 и убирает краевые пробелы.
-// Пунктуация, регистр и остальные символы сохраняются без изменений.
-func v138Normalize(value string) string {
-	return strings.Join(strings.FieldsFunc(value, func(char rune) bool {
-		return unicode.Is(unicode.White_Space, char)
-	}), " ")
 }

@@ -18,7 +18,7 @@ func TestV138NestedContexts(t *testing.T) {
 		t.Run(tag, func(t *testing.T) {
 			// У choice ровно один непустой правильный вариант и один обычный.
 			result := v138Document(t, v138Open(t, tag, 2, 1), v138Open(t, "answer", 3, 2),
-				v138TestText(t, "London", "London", 4, 3), v138Blank(t, "", 4, 3), v138Close(t, 4, 3),
+				v138TestText(t, "London", "London", 4, 3), v138TestText(t, "\u00a0", "\u00a0", 4, 3), v138Close(t, 4, 3),
 				v138TestText(t, "Paris", "Paris", 3, 2), v138Close(t, 3, 2))
 			v138Run(t, result, "current", [][4]int{{6, 1, 7, 1}})
 		})
@@ -27,7 +27,7 @@ func TestV138NestedContexts(t *testing.T) {
 		t.Run(tag, func(t *testing.T) {
 			// Два верхних элемента, ответы, разделитель и две нижние позиции.
 			result := v138Document(t, v138Open(t, tag, 2, 1), v138TestText(t, "City A", "City A", 3, 2),
-				v138Open(t, "answer", 3, 2), v138TestText(t, "London", "London", 5, 3), v138Blank(t, "", 5, 3), v138Close(t, 5, 3),
+				v138Open(t, "answer", 3, 2), v138TestText(t, "London", "London", 5, 3), v138TestText(t, "\u00a0", "\u00a0", 5, 3), v138Close(t, 5, 3),
 				v138TestText(t, "City B", "City B", 3, 2), v138Tag(t, "answer", "content", "Paris", 3, 2),
 				v138Line(t, "---", "separator", 3, 2), v138TestText(t, "London", "London", 3, 2), v138TestText(t, "Paris", "Paris", 3, 2),
 				v138Close(t, 3, 2))
@@ -37,13 +37,13 @@ func TestV138NestedContexts(t *testing.T) {
 	t.Run("task step and choice", func(t *testing.T) {
 		result := v138Document(t, v138Tag(t, "task", "identifier", "t", 2, 1), v138Tag(t, "step", "title", "First", 3, 2),
 			v138Open(t, "choice", 4, 3), v138Open(t, "answer", 5, 4), v138TestText(t, "London", "London", 6, 5),
-			v138Blank(t, "", 6, 5), v138Close(t, 6, 5), v138TestText(t, "Paris", "Paris", 5, 4), v138Close(t, 5, 4),
+			v138TestText(t, "\u00a0", "\u00a0", 6, 5), v138Close(t, 6, 5), v138TestText(t, "Paris", "Paris", 5, 4), v138Close(t, 5, 4),
 			v138Tag(t, "step", "title", "Second", 3, 2), v138TestText(t, "Read.", "Read.", 12, 3), v138Tag(t, "endtask", "", "", 2, 1))
 		v138Run(t, result, "current", [][4]int{{8, 1, 9, 1}})
 	})
 	t.Run("nested construction is excluded from outer answer", func(t *testing.T) {
 		result := v138AnswerDocument(t, v138TestText(t, "London", "London", 4, 2), v138Open(t, "editor", 4, 2),
-			v138Blank(t, "", 6, 3), v138Close(t, 6, 3), v138Blank(t, "", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2))
+			v138Blank(t, "", 6, 3), v138Close(t, 6, 3), v138TestText(t, "\u00a0", "\u00a0", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2))
 		v138ParserError(t, result, 6, "Вложенный тег внутри answer запрещён.")
 		v138Run(t, result, "current", [][4]int{{9, 1, 10, 1}})
 	})
@@ -71,9 +71,9 @@ func TestV138ExcludedAreasAndSeparateBlocks(t *testing.T) {
 	})
 	t.Run("two independent blocks", func(t *testing.T) {
 		result := v138Document(t, v138Tag(t, "question", "content", "First?", 2, 1), v138Open(t, "answer", 2, 1),
-			v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2), v138Close(t, 4, 2),
+			v138TestText(t, "London", "London", 4, 2), v138TestText(t, "\u00a0", "\u00a0", 4, 2), v138Close(t, 4, 2),
 			v138Tag(t, "question", "content", "Second?", 2, 1), v138Open(t, "answer", 2, 1),
-			v138TestText(t, "Paris", "Paris", 9, 2), v138Blank(t, "", 9, 2), v138Close(t, 9, 2))
+			v138TestText(t, "Paris", "Paris", 9, 2), v138TestText(t, "\u00a0", "\u00a0", 9, 2), v138Close(t, 9, 2))
 		v138Run(t, result, "current", [][4]int{{6, 1, 7, 1}, {11, 1, 12, 1}})
 	})
 }
@@ -85,12 +85,17 @@ func TestV138EOF(t *testing.T) {
 		ending         model.LineEnding
 		want           [][4]int
 	}{
-		{"spaces without EOL", "London", []model.Line{v138Blank(t, " \t", 4, 2)}, "", [][4]int{{5, 7, 6, 3}}},
-		{"empty last physical row with LF", "London", []model.Line{v138Blank(t, "", 4, 2)}, "\n", [][4]int{{5, 7, 6, 1}}},
-		{"empty last physical row with CRLF", "London", []model.Line{v138Blank(t, "", 4, 2)}, "\r\n", [][4]int{{5, 7, 6, 1}}},
-		{"two empty rows have prescribed equal ranges", "London", []model.Line{v138Blank(t, "", 4, 2), v138Blank(t, "", 4, 2)},
+		{"blank spaces without EOL", "London", []model.Line{v138Blank(t, " \t", 4, 2)}, "", nil},
+		{"content spaces without EOL", "London", []model.Line{v138TestText(t, " \t", " \t", 4, 2)}, "", [][4]int{{5, 7, 6, 3}}},
+		{"empty last physical row with LF", "London", []model.Line{v138Blank(t, "", 4, 2)}, "\n", nil},
+		{"empty last physical row with CRLF", "London", []model.Line{v138Blank(t, "", 4, 2)}, "\r\n", nil},
+		{"empty content with LF", "London", []model.Line{v138TestText(t, "", "", 4, 2)}, "\n", [][4]int{{5, 7, 6, 1}}},
+		{"empty content with CRLF", "London", []model.Line{v138TestText(t, "", "", 4, 2)}, "\r\n", [][4]int{{5, 7, 6, 1}}},
+		{"two blank rows", "London", []model.Line{v138Blank(t, "", 4, 2), v138Blank(t, "", 4, 2)}, "\n", nil},
+		{"two empty contents have prescribed equal ranges", "London", []model.Line{v138TestText(t, "", "", 4, 2), v138TestText(t, "", "", 4, 2)},
 			"\n", [][4]int{{6, 1, 7, 1}, {6, 1, 7, 1}}},
-		{"Unicode previous row", "Я😀", []model.Line{v138Blank(t, " ", 4, 2)}, "", [][4]int{{5, 3, 6, 2}}},
+		{"Unicode previous row before blank", "Я😀", []model.Line{v138Blank(t, " ", 4, 2)}, "", nil},
+		{"Unicode previous row before content", "Я😀", []model.Line{v138TestText(t, " ", " ", 4, 2)}, "", [][4]int{{5, 3, 6, 2}}},
 		{"Unicode whitespace without EOL", "London", []model.Line{v138TestText(t, "\u00a0", "\u00a0", 4, 2)}, "", [][4]int{{5, 7, 6, 2}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,6 +110,11 @@ func TestV138EOF(t *testing.T) {
 	t.Run("first own row is last physical row", func(t *testing.T) {
 		result := v138Document(t, v138Tag(t, "question", "content", "Where?", 2, 1), v138Open(t, "answer", 2, 1), v138Blank(t, " ", 4, 2))
 		v138ParserError(t, result, 4, "Блок answer не закрыт и не содержит ответа.")
+		v138Run(t, result, "current", nil)
+	})
+	t.Run("first own content is last physical row", func(t *testing.T) {
+		result := v138Document(t, v138Tag(t, "question", "content", "Where?", 2, 1), v138Open(t, "answer", 2, 1), v138TestText(t, " ", " ", 4, 2))
+		v138ParserError(t, result, 4, "Блок answer не закрыт и не содержит ответа.")
 		v138Run(t, result, "current", [][4]int{{4, 10, 5, 2}})
 	})
 }
@@ -112,7 +122,7 @@ func TestV138EOF(t *testing.T) {
 func TestV138EndingsCaseAndHistory(t *testing.T) {
 	for _, ending := range []string{"LF", "CRLF", "mixed"} {
 		t.Run(ending, func(t *testing.T) {
-			result := v138AnswerDocument(t, v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2))
+			result := v138AnswerDocument(t, v138TestText(t, "London", "London", 4, 2), v138TestText(t, "\u00a0", "\u00a0", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2))
 			for index := range result.Lines {
 				if ending == "CRLF" || ending == "mixed" && index%2 == 0 {
 					result.Lines[index].LineEnding = "\r\n"
@@ -126,7 +136,7 @@ func TestV138EndingsCaseAndHistory(t *testing.T) {
 		})
 	}
 	t.Run("case and indentation keep source positions", func(t *testing.T) {
-		result := v138AnswerDocument(t, v138Blank(t, "\t  ", 4, 2), v138TestText(t, "London", "London", 4, 2))
+		result := v138AnswerDocument(t, v138TestText(t, "\t  ", "\t  ", 4, 2), v138TestText(t, "London", "London", 4, 2))
 		result.Lines[3] = v138Line(t, " \t@AnSwEr {", "block-start", 2, 1,
 			v138Element(t, "tag", "@AnSwEr", "answer", 3, 10), v138Element(t, "block-open", "{", "{", 11, 12))
 		result.Lines[3].Number = 4
@@ -180,7 +190,7 @@ func TestV138Registration(t *testing.T) {
 		}
 		count++
 		if definition.Severity != "error" || definition.Scope != "block" || definition.Check == nil ||
-			definition.Message != "В блоке @answer есть пустая строка." ||
+			definition.Message != "В блоке @answer указано пустое значение ответа." ||
 			definition.Versions != (diagnostics.VersionRule{Mode: diagnostics.VersionExact, Version: "1.2"}) {
 			t.Fatalf("unexpected V138 definition: %+v", definition)
 		}
@@ -202,7 +212,9 @@ func TestV138ReferenceAndExample(t *testing.T) {
 		{"reference", "@question Where does Tom live?\n@answer {\nLondon\nParis\n}", []model.Line{
 			v138TestText(t, "London", "London", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2)}, nil},
 		{"example", "@question Where does Tom live?\n@answer {\nLondon\n\nParis\n}", []model.Line{
-			v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2)},
+			v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2)}, nil},
+		{"empty value", "@question Where does Tom live?\n@answer {\nLondon\n\u00a0\nParis\n}", []model.Line{
+			v138TestText(t, "London", "London", 4, 2), v138TestText(t, "\u00a0", "\u00a0", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2)},
 			[][4]int{{6, 1, 7, 1}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -227,19 +239,28 @@ func TestV138OwnRows(t *testing.T) {
 		rows []model.Line
 		want [][4]int
 	}{
-		{"first row", []model.Line{v138Blank(t, "", 4, 2), v138TestText(t, "London", "London", 4, 2)}, [][4]int{{5, 1, 6, 1}}},
-		{"last row before closing", []model.Line{v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2)}, [][4]int{{6, 1, 7, 1}}},
-		{"two adjacent rows", []model.Line{v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2),
-			v138Blank(t, "", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2)}, [][4]int{{6, 1, 7, 1}, {7, 1, 8, 1}}},
-		{"separate rows", []model.Line{v138Blank(t, "", 4, 2), v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2)},
+		{"first blank", []model.Line{v138Blank(t, "", 4, 2), v138TestText(t, "London", "London", 4, 2)}, nil},
+		{"last blank before closing", []model.Line{v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2)}, nil},
+		{"two adjacent blanks", []model.Line{v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2),
+			v138Blank(t, "", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2)}, nil},
+		{"separate blanks", []model.Line{v138Blank(t, "", 4, 2), v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2)}, nil},
+		{"blank space and tab", []model.Line{v138TestText(t, "London", "London", 4, 2), v138Blank(t, " \t  ", 4, 2)}, nil},
+		{"one blank and no nonempty answer", []model.Line{v138Blank(t, "", 4, 2)}, nil},
+		{"first content", []model.Line{v138TestText(t, "\u00a0", "\u00a0", 4, 2), v138TestText(t, "London", "London", 4, 2)}, [][4]int{{5, 1, 6, 1}}},
+		{"last content before closing", []model.Line{v138TestText(t, "London", "London", 4, 2), v138TestText(t, "\u00a0", "\u00a0", 4, 2)}, [][4]int{{6, 1, 7, 1}}},
+		{"two adjacent contents", []model.Line{v138TestText(t, "London", "London", 4, 2), v138TestText(t, "\u00a0", "\u00a0", 4, 2),
+			v138TestText(t, "\u00a0", "\u00a0", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2)}, [][4]int{{6, 1, 7, 1}, {7, 1, 8, 1}}},
+		{"separate contents", []model.Line{v138TestText(t, "\u00a0", "\u00a0", 4, 2), v138TestText(t, "London", "London", 4, 2), v138TestText(t, "\u00a0", "\u00a0", 4, 2)},
 			[][4]int{{5, 1, 6, 1}, {7, 1, 8, 1}}},
-		{"space and tab", []model.Line{v138TestText(t, "London", "London", 4, 2), v138Blank(t, " \t  ", 4, 2)}, [][4]int{{6, 1, 7, 1}}},
-		{"one blank and no nonempty answer", []model.Line{v138Blank(t, "", 4, 2)}, [][4]int{{5, 1, 6, 1}}},
+		{"content space and tab", []model.Line{v138TestText(t, "London", "London", 4, 2), v138TestText(t, " \t  ", " \t  ", 4, 2)}, [][4]int{{6, 1, 7, 1}}},
+		{"one empty content", []model.Line{v138TestText(t, "", "", 4, 2)}, [][4]int{{5, 1, 6, 1}}},
+		{"empty content between blanks and alternatives", []model.Line{v138TestText(t, "London", "London", 4, 2), v138Blank(t, "", 4, 2),
+			v138TestText(t, "\u00a0", "\u00a0", 4, 2), v138Blank(t, "", 4, 2), v138TestText(t, "Paris", "Paris", 4, 2)}, [][4]int{{7, 1, 8, 1}}},
 		{"no rows is not a blank row", nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := v138AnswerDocument(t, tc.rows...)
-			if tc.name == "no rows is not a blank row" || tc.name == "one blank and no nonempty answer" {
+			if tc.name == "no rows is not a blank row" || tc.name == "one blank and no nonempty answer" || tc.name == "one empty content" {
 				v138ParserError(t, result, 4, "Блок не содержит непустого ответа.")
 			}
 			v138Run(t, result, "current", tc.want)
@@ -276,6 +297,70 @@ func TestV138NonemptyValues(t *testing.T) {
 	} {
 		t.Run(strconv.Quote(tc.raw), func(t *testing.T) {
 			v138Run(t, v138AnswerDocument(t, v138TestText(t, tc.raw, tc.value, 4, 2)), "current", nil)
+		})
+	}
+}
+
+func TestV138ProcessedContent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  model.Line
+		want [][4]int
+	}{
+		{"empty processed value", v138TestText(t, "London", "", 4, 2), [][4]int{{5, 1, 6, 1}}},
+		{"processed whitespace", v138TestText(t, `\ `, " ", 4, 2), [][4]int{{5, 1, 6, 1}}},
+		{"nonempty processed value", v138TestText(t, " \t", "London", 4, 2), nil},
+		{"empty parts covering significant raw", v138Line(t, "AB", "content", 4, 2,
+			v138Element(t, "content", "A", "", 1, 2), v138Element(t, "content", "B", "", 2, 3)), [][4]int{{5, 1, 6, 1}}},
+		{"whitespace between empty parts", v138Line(t, "\u00a0 \u2003", "content", 4, 2,
+			v138Element(t, "content", "\u00a0", "\u00a0", 1, 2), v138Element(t, "content", "\u2003", "\u2003", 3, 4)), [][4]int{{5, 1, 6, 1}}},
+		{"nonempty first part", v138Line(t, "Paris\u00a0", "content", 4, 2,
+			v138Element(t, "content", "Paris", "Paris", 1, 6), v138Element(t, "content", "\u00a0", "\u00a0", 6, 7)), nil},
+		{"nonempty last part", v138Line(t, "\u00a0Paris", "content", 4, 2,
+			v138Element(t, "content", "\u00a0", "\u00a0", 1, 2), v138Element(t, "content", "Paris", "Paris", 2, 7)), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v138Run(t, v138AnswerDocument(t, tc.row), "current", tc.want)
+		})
+	}
+}
+
+func TestV138UnknownValues(t *testing.T) {
+	t.Run("no elements", func(t *testing.T) {
+		v138Run(t, v138AnswerDocument(t, v138Line(t, "\u00a0", "content", 4, 2)), "current", nil)
+	})
+	for _, withContent := range []bool{false, true} {
+		t.Run("unparsed with content="+strconv.FormatBool(withContent), func(t *testing.T) {
+			unknown := model.Element{ElementType: "unparsed", Raw: "?", Start: 1, End: 2, ErrorIDs: []string{"p1"}}
+			row := v138Line(t, "?", "content", 4, 2, unknown)
+			if withContent {
+				row.Raw += "\u00a0"
+				row.Elements = append(row.Elements, v138Element(t, "content", "\u00a0", "\u00a0", 2, 3))
+			}
+			result := v138AnswerDocument(t, row)
+			v138ParserError(t, result, 5, "Значение ответа не разобрано.")
+			result.Diagnostics[0].DiagnosticScope = "element"
+			result.Diagnostics[0].Location.End.Column = 2
+			v138Run(t, result, "current", nil)
+		})
+	}
+}
+
+func TestV138UncoveredSignificantRaw(t *testing.T) {
+	// Пустые известные фрагменты не доказывают пустоту неразобранного остатка.
+	for _, tc := range []struct {
+		name string
+		row  model.Line
+	}{
+		{"prefix", v138Line(t, "Я\u00a0", "content", 4, 2, v138Element(t, "content", "\u00a0", "\u00a0", 2, 3))},
+		{"middle", v138Line(t, "\u00a0x\u2003", "content", 4, 2,
+			v138Element(t, "content", "\u00a0", "\u00a0", 1, 2), v138Element(t, "content", "\u2003", "\u2003", 3, 4))},
+		{"suffix", v138Line(t, "\u00a0x", "content", 4, 2, v138Element(t, "content", "\u00a0", "\u00a0", 1, 2))},
+		{"zero width content", v138Line(t, "x", "content", 4, 2, v138Element(t, "content", "", "", 1, 1))},
+		{"no content elements", v138Line(t, "x", "content", 4, 2)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v138Run(t, v138AnswerDocument(t, tc.row), "current", nil)
 		})
 	}
 }
@@ -320,7 +405,7 @@ func v138Run(t *testing.T, result *model.Result, source string, want [][4]int) {
 		entry := got[index]
 		location := model.Location{Start: model.Position{Line: expected[0], Column: expected[1]}, End: model.Position{Line: expected[2], Column: expected[3]}}
 		if entry.ID == "" || entry.Fatal || entry.SeverityLevel != "error" || entry.DiagnosticScope != "block" ||
-			entry.Message != "В блоке @answer есть пустая строка." || len(entry.RelatedLocations) != 0 ||
+			entry.Message != "В блоке @answer указано пустое значение ответа." || len(entry.RelatedLocations) != 0 ||
 			entry.Location == nil || *entry.Location != location {
 			t.Fatalf("occurrence %d = %+v, want exact metadata and range %+v", index, entry, location)
 		}

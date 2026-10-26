@@ -121,8 +121,8 @@ func v181CheckAnswer(rows []diagnostics.Line, block bool, limit string, findings
 	return nil
 }
 
-// v181Number читает целое обработанное значение и исходный диапазон [start,end).
-// Пустая строка результата означает, что значение не признано [1-9][0-9]*.
+// v181Number читает обработанное значение и исходный диапазон [start,end).
+// Пустая строка результата означает, что answerPosition не распознал номер.
 // Смежные фрагменты content составляют одно значение; промежутки между ними
 // не удаляются ради получения числа. Экранирование повторно не обрабатывается.
 func v181Number(line diagnostics.Line) (string, int, int) {
@@ -146,14 +146,9 @@ func v181Number(line diagnostics.Line) (string, int, int) {
 		end = element.End()
 		text.WriteString(value)
 	}
-	number := text.String()
-	if number == "" || number[0] < '1' || number[0] > '9' {
+	number, valid := answerPosition(text.String())
+	if !valid {
 		return "", 0, 0
-	}
-	for index := 1; index < len(number); index++ {
-		if number[index] < '0' || number[index] > '9' {
-			return "", 0, 0
-		}
 	}
 	return number, start, end
 }

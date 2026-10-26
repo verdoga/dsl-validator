@@ -2,7 +2,6 @@ package checkers
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -44,23 +43,15 @@ func checkV170(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if !ok {
 			continue
 		}
+		groups, ok := v170Values(lines, answers)
+		if !ok {
+			continue
+		}
 		labels, ok := v170Labels(children[separator+1:])
 		if !ok {
 			continue
 		}
-		for _, answer := range answers {
-			var values []v170Value
-			if answer.Type() == "block-start" {
-				for _, line := range v170Children(lines, answer) {
-					if line.Type() == "content" {
-						if value, ok := v170Text(line, false, false); ok {
-							values = append(values, value)
-						}
-					}
-				}
-			} else if value, ok := v170Text(answer, true, false); ok {
-				values = append(values, value)
-			}
+		for _, values := range groups {
 			if err := v170Report(values, labels, findings); err != nil {
 				return err
 			}
@@ -71,6 +62,7 @@ func checkV170(lines diagnostics.Lines, findings diagnostics.Findings) error {
 
 // v170Children исключает пустые физические строки и содержимое вложенных блоков.
 // Границы и родители берутся из модели, а не восстанавливаются из текста.
+// Пустоту content и invalid вызывающий код определяет по готовому значению.
 func v170Children(lines diagnostics.Lines, block diagnostics.Line) []diagnostics.Line {
 	var children []diagnostics.Line
 	for number := block.Number() + 1; number <= lines.Len(); number++ {
@@ -85,7 +77,7 @@ func v170Children(lines diagnostics.Lines, block diagnostics.Line) []diagnostics
 		if line.Type() == "block-end" {
 			break
 		}
-		if strings.Trim(line.Raw(), " \t") != "" {
+		if line.Type() != "blank" || strings.Trim(line.Raw(), " \t") != "" {
 			children = append(children, line)
 		}
 	}
@@ -124,7 +116,36 @@ func v170Answers(upper []diagnostics.Line) ([]diagnostics.Line, bool) {
 			index++
 		}
 	}
-	return answers, true
+	return answers, len(answers) != 0
+}
+
+// v170Values проверяет все альтернативы блока до выдачи любых сообщений.
+// Недоступное или пустое по основной форме значение отменяет проверку блока.
+func v170Values(lines diagnostics.Lines, answers []diagnostics.Line) ([][]v170Value, bool) {
+	var groups [][]v170Value
+	for _, answer := range answers {
+		rows := []diagnostics.Line{answer}
+		inline := answer.Type() != "block-start"
+		if !inline {
+			rows = v170Children(lines, answer)
+		}
+		var values []v170Value
+		for _, row := range rows {
+			if !inline && row.Type() != "content" && row.Type() != "invalid" {
+				continue
+			}
+			value, ok := v170Text(row, inline, false)
+			if !ok || answerPrimary(value.text) == "" {
+				return nil, false
+			}
+			values = append(values, value)
+		}
+		if len(values) == 0 {
+			return nil, false
+		}
+		groups = append(groups, values)
+	}
+	return groups, true
 }
 
 // v170Labels не доказывает отсутствие ответа, если хотя бы одна подпись неизвестна.
@@ -138,7 +159,7 @@ func v170Labels(lower []diagnostics.Line) ([]v170Value, bool) {
 		if !ok {
 			return nil, false
 		}
-		if !v170Empty(value.text) {
+		if answerPrimary(value.text) != "" {
 			labels = append(labels, value)
 		}
 	}
@@ -232,23 +253,16 @@ func v170Unescape(raw []rune, lineStart, separator bool) (string, bool) {
 	return value.String(), true
 }
 
-func v170Empty(value string) bool {
-	return strings.TrimFunc(value, unicode.IsSpace) == ""
-}
-
 // v170Report объединяет отсутствующие значения только внутри одного answer.
-// Порядок исходных вхождений сохраняется; регистр — единственное различие,
-// которое игнорируется при сравнении как с вариантами, так и с повторами.
+// Порядок и диапазоны вхождений сохраняются; сравнение с вариантами и повторами
+// использует полную нормализацию ответов.
 func v170Report(values, labels []v170Value, findings diagnostics.Findings) error {
 	var reported []v170Value
 	var occurrences []int
 	for _, value := range values {
-		if v170Empty(value.text) {
-			continue
-		}
 		matched := false
 		for _, label := range labels {
-			if strings.EqualFold(value.text, label.text) {
+			if answerEqual(value.text, label.text) {
 				matched = true
 				break
 			}
@@ -258,7 +272,7 @@ func v170Report(values, labels []v170Value, findings diagnostics.Findings) error
 		}
 		occurrence := 0
 		for index, previous := range reported {
-			if strings.EqualFold(value.text, previous.text) {
+			if answerEqual(value.text, previous.text) {
 				occurrence = occurrences[index]
 				break
 			}

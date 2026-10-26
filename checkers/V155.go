@@ -178,17 +178,10 @@ func v155Answer(text []rune, index int) (int, bool) {
 			return index, false
 		}
 		if char == '}' {
-			return index + 1, v155Normalize(answer.String()) != ""
+			return index + 1, answerPrimary(answer.String()) != ""
 		}
 		answer.WriteRune(char)
 		index++
 	}
 	return index, false
-}
-
-// v155Normalize выполняет основную нормализацию, сохраняя пунктуацию.
-func v155Normalize(answer string) string {
-	return strings.Join(strings.FieldsFunc(strings.ToLower(answer), func(char rune) bool {
-		return unicode.Is(unicode.White_Space, char)
-	}), " ")
 }

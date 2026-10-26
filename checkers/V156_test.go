@@ -90,13 +90,17 @@ func TestV156Counts(t *testing.T) {
 			{"two without answers", []model.Line{v156TextRow(t, "Spain", "Spain", 3), v156TextRow(t, "France", "France", 3)}, nil},
 			{"three", []model.Line{v156TextRow(t, "Spain", "Spain", 3), v156TextRow(t, "France", "France", 3), v156TextRow(t, "Italy", "Italy", 3)}, nil},
 			{"equal labels", []model.Line{v156TextRow(t, "Spain", "Spain", 3), v156TextRow(t, "Spain", "Spain", 3)}, nil},
+			{"normalized equal ordinary labels", []model.Line{v156TextRow(t, "\u00a0НЬЮ\tЙОРК\u2003", "\u00a0НЬЮ\tЙОРК\u2003", 3), v156TextRow(t, "нью йорк", "нью йорк", 3)}, nil},
 			{"one inline answer", []model.Line{v156Tag(t, "answer", "Spain", 3)}, []v156Expected{{3, 1, 5, 2, 1}}},
+			{"normalized equal inline answers", []model.Line{v156Tag(t, "answer", "\u00a0НЬЮ\tЙОРК\u2003", 3), v156Tag(t, "answer", "нью йорк", 3)}, nil},
 			{"ordinary and answer", []model.Line{v156TextRow(t, "France", "France", 3), v156Tag(t, "answer", "Spain", 3)}, nil},
 			{"empty inline answer", []model.Line{v156Tag(t, "answer", "", 3)}, []v156Expected{{3, 1, 5, 2, 0}}},
 			{"empty block answer", []model.Line{v156Open(t, "answer", "answer", 3), v156Close(t, 4)}, []v156Expected{{3, 1, 6, 2, 0}}},
 			{"one block answer line", []model.Line{v156Open(t, "answer", "answer", 3), v156TextRow(t, "Spain", "Spain", 4), v156Close(t, 4)}, []v156Expected{{3, 1, 7, 2, 1}}},
 			{"two block answer lines", []model.Line{v156Open(t, "answer", "answer", 3), v156TextRow(t, "Spain", "Spain", 4), v156TextRow(t, "France", "France", 4), v156Close(t, 4)}, nil},
 			{"same block answer lines", []model.Line{v156Open(t, "answer", "answer", 3), v156TextRow(t, "Spain", "Spain", 4), v156TextRow(t, "Spain", "Spain", 4), v156Close(t, 4)}, nil},
+			{"normalized equal block answer lines", []model.Line{v156Open(t, "answer", "answer", 3), v156TextRow(t, "\u00a0НЬЮ\tЙОРК\u2003", "\u00a0НЬЮ\tЙОРК\u2003", 4), v156TextRow(t, "нью йорк", "нью йорк", 4), v156Close(t, 4)}, nil},
+			{"normalized equal separate block answers", []model.Line{v156Open(t, "answer", "answer", 3), v156TextRow(t, "\u00a0НЬЮ\tЙОРК\u2003", "\u00a0НЬЮ\tЙОРК\u2003", 4), v156Close(t, 4), v156Open(t, "answer", "answer", 3), v156TextRow(t, "нью йорк", "нью йорк", 7), v156Close(t, 7)}, nil},
 			{"ordinary and block answer", []model.Line{v156TextRow(t, "France", "France", 3), v156Open(t, "answer", "answer", 3), v156TextRow(t, "Spain", "Spain", 5), v156Close(t, 5)}, nil},
 			{"blanks between variants", []model.Line{v156TextRow(t, "Spain", "Spain", 3), v156Line(t, "", "blank", 3), v156TextRow(t, "France", "France", 3)}, nil},
 			{"blank whitespace", []model.Line{v156Line(t, " \t ", "blank", 3)}, []v156Expected{{3, 1, 5, 2, 0}}},
@@ -106,6 +110,7 @@ func TestV156Counts(t *testing.T) {
 			{"escaped ordinary text", []model.Line{v156TextRow(t, `\@hint Spain`, "@hint Spain", 3), v156TextRow(t, `\{France\}`, "{France}", 3)}, nil},
 			{"escaped block answer text", []model.Line{v156Open(t, "answer", "answer", 3), v156TextRow(t, `\\`, `\`, 4), v156TextRow(t, `\# Label`, "# Label", 4), v156Close(t, 4)}, nil},
 			{"punctuation answer", []model.Line{v156Tag(t, "answer", "; / ,", 3)}, []v156Expected{{3, 1, 5, 2, 1}}},
+			{"punctuation block answer", []model.Line{v156Open(t, "answer", "answer", 3), v156TextRow(t, "; / ,", "; / ,", 4), v156Close(t, 4)}, []v156Expected{{3, 1, 7, 2, 1}}},
 			{"unknown escape is not erased", []model.Line{v156Tag(t, "answer", `\ `, 3)}, []v156Expected{{3, 1, 5, 2, 1}}},
 			{"one line with multiple content elements", []model.Line{v156Line(t, "Spain France", "content", 3, v156TestElement(t, "content", "Spain", "Spain", 1), v156TestElement(t, "content", "France", "France", 7))}, []v156Expected{{3, 1, 5, 2, 1}}},
 		} {
@@ -170,6 +175,8 @@ func TestV156WhitespaceRules(t *testing.T) {
 		t.Run(fmt.Sprintf("answer U+%04X", char), func(t *testing.T) {
 			v156Run(t, v156Choice(t, "multichoice", v156Tag(t, "answer", string(char), 3)), "current", []v156Expected{{3, 1, 5, 2, 0}})
 			v156Run(t, v156Choice(t, "choice", v156Open(t, "answer", "answer", 3), v156TextRow(t, string(char), string(char), 4), v156Close(t, 4)), "current", []v156Expected{{3, 1, 7, 2, 0}})
+			v156Run(t, v156Choice(t, "choice", v156Tag(t, "answer", string(char), 3)), "current", []v156Expected{{3, 1, 5, 2, 0}})
+			v156Run(t, v156Choice(t, "multichoice", v156Open(t, "answer", "answer", 3), v156TextRow(t, string(char), string(char), 4), v156Close(t, 4)), "current", []v156Expected{{3, 1, 7, 2, 0}})
 		})
 	}
 	for _, raw := range []string{"\u200b", "\ufeff", "\u0301", "😀", "Я"} {
@@ -218,8 +225,10 @@ func TestV156UnknownContent(t *testing.T) {
 			{"invalid possible option", []model.Line{v156TextRow(t, "Spain", "Spain", 3), v156Invalid(t, "@unknown", 3)}},
 			{"partially parsed option", []model.Line{v156Line(t, "Spain {", "content", 3, v156TestElement(t, "content", "Spain", "Spain", 1), v156TestElement(t, "unparsed", "{", "", 7))}},
 			{"unparsed inline answer", []model.Line{v156Line(t, "@answer {oops", "tag", 3, v156TestElement(t, "tag", "@answer", "answer", 1), v156TestElement(t, "unparsed", "{oops", "", 9))}},
+			{"unparsed inline answer Unicode whitespace", []model.Line{v156Line(t, "@answer \u2003\u00a0", "tag", 3, v156TestElement(t, "tag", "@answer", "answer", 1), v156TestElement(t, "unparsed", "\u2003\u00a0", "", 9))}},
 			{"unparsed block answer", []model.Line{v156Open(t, "answer", "answer", 3), v156Invalid(t, "@unknown", 4), v156Close(t, 4)}},
 			{"unparsed answer whitespace", []model.Line{v156Open(t, "answer", "answer", 3), v156Invalid(t, "\u00a0", 4), v156Close(t, 4)}},
+			{"unparsed block answer Unicode whitespace", []model.Line{v156Open(t, "answer", "answer", 3), v156Invalid(t, "\u2003\u00a0", 4), v156Close(t, 4)}},
 		} {
 			t.Run(tag+"/"+tc.name, func(t *testing.T) { v156Run(t, v156Choice(t, tag, tc.body...), "current", nil) })
 		}

@@ -154,6 +154,88 @@ func TestV137TextValues(t *testing.T) {
 	}
 }
 
+func TestV137ReadyContentValues(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, value string
+		want             [][4]int
+	}{
+		{"nonempty source with empty value", "Source", "", [][4]int{{5, 1, 7, 2}}},
+		{"nonempty source with Unicode whitespace value", "Source", " \t\u00a0\u1680\u2003\u202f\u3000 ", [][4]int{{5, 1, 7, 2}}},
+		{"Unicode whitespace source with answer value", "\u00a0\u2003", "London", nil},
+		{"ASCII whitespace source with answer value", " \t ", "Paris", nil},
+		{"whitespace source with punctuation value", "\u3000", " \u2003…!?\u00a0 ", nil},
+		{"nonempty source with zero width space value", "Source", "\u200b", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := v137TestText(t, tc.raw, tc.value, 5)
+			v137TestRun(t, v137TestAnswer(t, row), "current", tc.want)
+		})
+	}
+}
+
+func TestV137CompositeReadyContentValues(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		values [3]string
+		want   [][4]int
+	}{
+		{"all values empty", [3]string{"", "", ""}, [][4]int{{5, 1, 7, 2}}},
+		{"all values Unicode whitespace", [3]string{"\u00a0", "\t\u2003", "\u202f\u3000"}, [][4]int{{5, 1, 7, 2}}},
+		{"first value is an answer", [3]string{"London", "\u2003", ""}, nil},
+		{"middle value is an answer", [3]string{"\u00a0", "London", ""}, nil},
+		{"last value is an answer", [3]string{"\u00a0", "", "London"}, nil},
+		{"punctuation value is an answer", [3]string{"\u00a0", "…", "\u2003"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := v137TestLine(t, "A B C", "content", 5,
+				v137TestElement(t, "content", "A", tc.values[0], 1),
+				v137TestElement(t, "content", "B", tc.values[1], 3),
+				v137TestElement(t, "content", "C", tc.values[2], 5))
+			v137TestRun(t, v137TestAnswer(t, row), "current", tc.want)
+		})
+	}
+	t.Run("whitespace source fragments with nonempty final value", func(t *testing.T) {
+		row := v137TestLine(t, "\u00a0 \u2003", "content", 5,
+			v137TestElement(t, "content", "\u00a0", "", 1),
+			v137TestElement(t, "content", "\u2003", "Paris", 3))
+		v137TestRun(t, v137TestAnswer(t, row), "current", nil)
+	})
+	t.Run("uncovered Unicode whitespace remains unknown", func(t *testing.T) {
+		row := v137TestLine(t, "A\u00a0B", "content", 5,
+			v137TestElement(t, "content", "A", "", 1),
+			v137TestElement(t, "content", "B", "\u2003", 3))
+		v137TestRun(t, v137TestAnswer(t, row), "current", nil)
+	})
+	t.Run("unparsed fragment remains unknown", func(t *testing.T) {
+		row := v137TestLine(t, "A ? B", "content", 5,
+			v137TestElement(t, "content", "A", "\u00a0", 1),
+			v137TestElement(t, "unparsed", "?", "", 3),
+			v137TestElement(t, "content", "B", "", 5))
+		v137TestRun(t, v137TestAnswer(t, row), "current", nil)
+	})
+}
+
+func TestV137EmptyReadyValuesAndUnknownRows(t *testing.T) {
+	for _, unknownFirst := range []bool{false, true} {
+		t.Run("unknown first="+strconv.FormatBool(unknownFirst), func(t *testing.T) {
+			body := []model.Line{v137TestText(t, "Source", "\u00a0\u2003", 5), v137TestInvalid(t, "?", 5)}
+			if unknownFirst {
+				body[0], body[1] = body[1], body[0]
+			}
+			v137TestRun(t, v137TestAnswer(t, body...), "current", nil)
+		})
+	}
+	t.Run("nested tag value is excluded", func(t *testing.T) {
+		v137TestRun(t, v137TestAnswer(t, v137TestText(t, "Source", "\u00a0", 5),
+			v137TestTag(t, "note", "London", "content", 5)), "current", [][4]int{{5, 1, 8, 2}})
+	})
+	t.Run("unknown row inside known nested block is excluded", func(t *testing.T) {
+		v137TestRun(t, v137TestAnswer(t, v137TestText(t, "Source", "\u2003", 5),
+			v137TestOpen(t, "note", 5), v137TestInvalid(t, "?", 7), v137TestClose(t, 7)),
+			"current", [][4]int{{5, 1, 10, 2}})
+	})
+}
+
 func TestV137ZeroWidthContent(t *testing.T) {
 	for _, tc := range []struct {
 		name, raw string

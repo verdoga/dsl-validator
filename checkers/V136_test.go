@@ -79,9 +79,16 @@ func TestV136Whitespace(t *testing.T) {
 		" \t\u00a0\u2003\u2028\u3000\t ",
 	} {
 		t.Run(fmt.Sprintf("%q", suffix), func(t *testing.T) {
-			// Краевые пробелы могут не входить ни в один content. Raw сохраняет их.
-			result := v136Document(t, v136Question(t, 2, 1), v136Answer(t, suffix, "tag", 2, 1))
-			v136Run(t, result, "current", []v136Expected{{4, 1, 8}})
+			t.Run("uncovered", func(t *testing.T) {
+				// Краевые пробелы могут не входить ни в один content. Raw сохраняет их.
+				result := v136Document(t, v136Question(t, 2, 1), v136Answer(t, suffix, "tag", 2, 1))
+				v136Run(t, result, "current", []v136Expected{{4, 1, 8}})
+			})
+			t.Run("content value", func(t *testing.T) {
+				line := v136Answer(t, suffix, "tag", 2, 1,
+					v136Element(t, "content", suffix, suffix, 8, 8+utf8.RuneCountInString(suffix)))
+				v136Run(t, v136Document(t, v136Question(t, 2, 1), line), "current", []v136Expected{{4, 1, 8}})
+			})
 		})
 	}
 	for _, raw := range []string{"@ANSWER", "@AnSwEr", "\t  @AnSwEr \t"} {
@@ -123,6 +130,60 @@ func TestV136NonemptyTextAndEscapes(t *testing.T) {
 	}
 }
 
+func TestV136ProcessedContent(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, value string
+		empty            bool
+	}{
+		{"processed empty", "source", "", true},
+		{"processed Unicode whitespace", "source", "\u00a0\u2003\t\u3000", true},
+		{"processed nonempty", " ", "London", false},
+		{"processed punctuation", " ", "—…", false},
+		{"literal slash t remains text", " ", `\t`, false},
+		{"literal slash n remains text", " ", `\n`, false},
+		{"literal Unicode escape remains text", " ", `\u00a0`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Вывод о пустоте зависит от готового Value, а не Raw. Буквальные
+			// последовательности с обратной косой чертой уже обработаны парсером.
+			line := v136Answer(t, " "+tc.raw, "tag", 2, 1,
+				v136Element(t, "content", tc.raw, tc.value, 9, 9+utf8.RuneCountInString(tc.raw)))
+			var want []v136Expected
+			if tc.empty {
+				want = []v136Expected{{4, 1, 8}}
+			}
+			v136Run(t, v136Document(t, v136Question(t, 2, 1), line), "current", want)
+		})
+	}
+}
+
+func TestV136ContentFragments(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		line model.Line
+		want []v136Expected
+	}{
+		{"all processed empty", v136Answer(t, " ab", "tag", 2, 1,
+			v136Element(t, "content", "a", "", 9, 10), v136Element(t, "content", "b", "", 10, 11)), []v136Expected{{4, 1, 8}}},
+		{"Unicode values and uncovered whitespace gaps", v136Answer(t, " a \u00a0b\t", "tag", 2, 1,
+			v136Element(t, "content", "a", "\u2003", 9, 10), v136Element(t, "content", "b", "\t\u3000", 12, 13)), []v136Expected{{4, 1, 8}}},
+		{"nonempty first value", v136Answer(t, " ab", "tag", 2, 1,
+			v136Element(t, "content", "a", "!", 9, 10), v136Element(t, "content", "b", "", 10, 11)), nil},
+		{"nonempty last value", v136Answer(t, " ab", "tag", 2, 1,
+			v136Element(t, "content", "a", "", 9, 10), v136Element(t, "content", "b", "…", 10, 11)), nil},
+		{"fragment boundary does not decode slash t", v136Answer(t, " ab", "tag", 2, 1,
+			v136Element(t, "content", "a", `\`, 9, 10), v136Element(t, "content", "b", "t", 10, 11)), nil},
+		{"significant uncovered gap is unknown", v136Answer(t, " a!b", "tag", 2, 1,
+			v136Element(t, "content", "a", "", 9, 10), v136Element(t, "content", "b", "", 11, 12)), nil},
+		{"zero length content does not uncover previous text", v136Answer(t, " ab", "tag", 2, 1,
+			v136Element(t, "content", "ab", "", 9, 11), v136Element(t, "content", "", "", 10, 10)), []v136Expected{{4, 1, 8}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v136Run(t, v136Document(t, v136Question(t, 2, 1), tc.line), "current", tc.want)
+		})
+	}
+}
+
 func TestV136UnparsedAndUncoveredContent(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -130,7 +191,9 @@ func TestV136UnparsedAndUncoveredContent(t *testing.T) {
 		want []v136Expected
 	}{
 		{"nonempty unparsed", v136Answer(t, " !", "invalid", 2, 1, v136Unparsed(t, "!", 9, 10)), nil},
-		{"whitespace unparsed", v136Answer(t, " \u00a0", "invalid", 2, 1, v136Unparsed(t, "\u00a0", 9, 10)), []v136Expected{{4, 1, 8}}},
+		{"whitespace unparsed", v136Answer(t, " \u00a0", "invalid", 2, 1, v136Unparsed(t, "\u00a0", 9, 10)), nil},
+		{"empty content then whitespace unparsed", v136Answer(t, " a\u00a0", "invalid", 2, 1,
+			v136Element(t, "content", "a", "", 9, 10), v136Unparsed(t, "\u00a0", 10, 11)), nil},
 		{"empty content then unparsed", v136Answer(t, "  !", "invalid", 2, 1,
 			v136Element(t, "content", " ", "", 9, 10), v136Unparsed(t, "!", 10, 11)), nil},
 		{"several content pieces", v136Answer(t, " \u00a0x", "tag", 2, 1,
@@ -187,6 +250,55 @@ func TestV136ContextAndRepeatedDeclarations(t *testing.T) {
 		v136ParserError(t, result, 4, 0)
 		v136Run(t, result, "current", []v136Expected{{4, 1, 8}})
 	})
+}
+
+func TestV136InteractiveContexts(t *testing.T) {
+	for _, context := range []struct {
+		name                  string
+		before, after         []model.Line
+		parent, depth, number int
+	}{
+		{"question", []model.Line{v136Question(t, 2, 1)}, nil, 2, 1, 4},
+		{"choice", []model.Line{v136Open(t, "choice", 2, 1)},
+			[]model.Line{v136Text(t, "Paris", 3, 2), v136Close(t, 3, 2)}, 3, 2, 4},
+		{"multichoice", []model.Line{v136Open(t, "multichoice", 2, 1)},
+			[]model.Line{v136Text(t, "Paris", 3, 2), v136Close(t, 3, 2)}, 3, 2, 4},
+		{"matching", []model.Line{v136Open(t, "matching", 2, 1), v136Text(t, "City A", 3, 2)},
+			[]model.Line{v136Text(t, "City B", 3, 2), v136Named(t, "answer", "content", "Paris", 3, 2),
+				v136Line(t, "---", "separator", 3, 2), v136Text(t, "London", 3, 2), v136Text(t, "Paris", 3, 2), v136Close(t, 3, 2)}, 3, 2, 5},
+		{"ordering without separator", []model.Line{v136Open(t, "ordering", 2, 1), v136Text(t, "First", 3, 2)},
+			[]model.Line{v136Text(t, "Second", 3, 2), v136Named(t, "answer", "content", "2", 3, 2), v136Close(t, 3, 2)}, 3, 2, 5},
+		{"ordering with separator", []model.Line{v136Open(t, "ordering", 2, 1), v136Text(t, "City A", 3, 2)},
+			[]model.Line{v136Text(t, "City B", 3, 2), v136Named(t, "answer", "content", "Paris", 3, 2),
+				v136Line(t, "---", "separator", 3, 2), v136Text(t, "London", 3, 2), v136Text(t, "Paris", 3, 2), v136Close(t, 3, 2)}, 3, 2, 5},
+	} {
+		for _, tc := range []struct {
+			name, raw, value string
+			empty            bool
+		}{
+			{"missing", "", "", true},
+			{"Unicode whitespace", "\u00a0\t\u2003\u3000", "\u00a0\t\u2003\u3000", true},
+			{"processed whitespace", "source", "\u00a0\t\u2003\u3000", true},
+			{"punctuation", "...—…", "...—…", false},
+			{"no second decoding", `\\t`, `\t`, false},
+		} {
+			t.Run(context.name+"/"+tc.name, func(t *testing.T) {
+				answer := v136Answer(t, "", "tag", context.parent, context.depth)
+				if tc.raw != "" {
+					answer = v136Answer(t, " "+tc.raw, "tag", context.parent, context.depth,
+						v136Element(t, "content", tc.raw, tc.value, 9, 9+utf8.RuneCountInString(tc.raw)))
+				}
+				body := append([]model.Line{}, context.before...)
+				body = append(body, answer)
+				body = append(body, context.after...)
+				var want []v136Expected
+				if tc.empty {
+					want = []v136Expected{{context.number, 1, 8}}
+				}
+				v136Run(t, v136Document(t, body...), "current", want)
+			})
+		}
+	}
 }
 
 func TestV136BlocksAndLiteralContexts(t *testing.T) {
