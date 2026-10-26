@@ -84,14 +84,14 @@ func TestV068CountsAndTaskBoundaries(t *testing.T) {
 		{"no tasks", []model.Line{v068TestText(t, "Read.", "Read.", 2, 1)}, nil},
 		{"zero steps", []model.Line{
 			v068TestTag(t, "task", "identifier", "practice", 2, 1), v068TestTag(t, "endtask", "", "", 3, 2),
-		}, []v068Expected{{3, 1, 6, "Найдено этапов: 0."}}},
+		}, nil},
 		{"content is not a step", []model.Line{
 			v068TestTag(t, "task", "identifier", "practice", 2, 1), v068TestText(t, "Read.", "Read.", 3, 2),
 			v068TestTag(t, "endtask", "", "", 3, 2),
-		}, []v068Expected{{3, 1, 6, "Найдено этапов: 0."}}},
+		}, nil},
 		{"task at EOF", []model.Line{
 			v068TestTag(t, "task", "identifier", "practice", 2, 1),
-		}, []v068Expected{{3, 1, 6, "Найдено этапов: 0."}}},
+		}, nil},
 		{"two steps", []model.Line{
 			v068TestTag(t, "task", "identifier", "practice", 2, 1),
 			v068TestTag(t, "step", "title", "Read", 3, 2), v068TestTag(t, "step", "title", "Write", 3, 2),
@@ -115,7 +115,7 @@ func TestV068CountsAndTaskBoundaries(t *testing.T) {
 		{"next task resets count", []model.Line{
 			v068TestTag(t, "task", "identifier", "practice", 2, 1), v068TestTag(t, "step", "title", "Read", 3, 2),
 			v068TestTag(t, "task", "identifier", "other", 2, 1), v068TestTag(t, "endtask", "", "", 5, 2),
-		}, []v068Expected{{3, 1, 6, "Найдено этапов: 1."}, {5, 1, 6, "Найдено этапов: 0."}}},
+		}, []v068Expected{{3, 1, 6, "Найдено этапов: 1."}}},
 		{"later steps do not fill previous task", []model.Line{
 			v068TestTag(t, "task", "identifier", "practice", 2, 1), v068TestTag(t, "step", "title", "Read", 3, 2),
 			v068TestTag(t, "task", "identifier", "other", 2, 1),
@@ -125,8 +125,9 @@ func TestV068CountsAndTaskBoundaries(t *testing.T) {
 		{"earlier steps do not fill next task", []model.Line{
 			v068TestTag(t, "task", "identifier", "practice", 2, 1),
 			v068TestTag(t, "step", "title", "Read", 3, 2), v068TestTag(t, "step", "title", "Write", 3, 2),
-			v068TestTag(t, "task", "identifier", "other", 2, 1), v068TestTag(t, "endtask", "", "", 6, 2),
-		}, []v068Expected{{6, 1, 6, "Найдено этапов: 0."}}},
+			v068TestTag(t, "task", "identifier", "other", 2, 1),
+			v068TestTag(t, "step", "title", "Check", 6, 2), v068TestTag(t, "endtask", "", "", 6, 2),
+		}, []v068Expected{{6, 1, 6, "Найдено этапов: 1."}}},
 		{"header ends task", []model.Line{
 			v068TestTag(t, "task", "identifier", "practice", 2, 1), v068TestTag(t, "step", "title", "Read", 3, 2),
 			v068TestTag(t, "header", "title", "Theory", 2, 1),
@@ -150,8 +151,9 @@ func TestV068CountsAndTaskBoundaries(t *testing.T) {
 			v068TestLine(t, " \t@task учёба ", "tag", 2, 1,
 				v068TestElement(t, "tag", "@task", "task", 3, 8),
 				v068TestElement(t, "identifier", "учёба", "учёба", 9, 14)),
+			v068TestTag(t, "step", "title", "Read", 3, 2),
 			v068TestTag(t, "endtask", "", "", 3, 2),
-		}, []v068Expected{{3, 3, 8, "Найдено этапов: 0."}}},
+		}, []v068Expected{{3, 3, 8, "Найдено этапов: 1."}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v068TestRun(t, v068TestDocument(t, tc.body...), "current", tc.want)
@@ -203,7 +205,7 @@ func TestV068Branches(t *testing.T) {
 					v068TestTag(t, "task", "identifier", "practice", branchParent, depth),
 					v068TestTag(t, "step", "title", "Read", 7, depth+1), v068TestClose(t, 3, 2),
 					v068TestTag(t, "task", "identifier", "other", 2, 1), v068TestTag(t, "endtask", "", "", 10, 2)),
-					"current", []v068Expected{{7, 1, 6, "Найдено этапов: 1."}, {10, 1, 6, "Найдено этапов: 0."}})
+					"current", []v068Expected{{7, 1, 6, "Найдено этапов: 1."}})
 			})
 		})
 	}
@@ -305,7 +307,7 @@ func TestV068ExcludedBlocks(t *testing.T) {
 			v068TestTag(t, "task", "identifier", "practice", 2, 1),
 			v068TestTag(t, "editor", "content", "@step Hidden", 3, 2),
 			v068TestTag(t, "endtask", "", "", 3, 2)), "current",
-			[]v068Expected{{3, 1, 6, "Найдено этапов: 0."}})
+			nil)
 	})
 }
 
@@ -379,12 +381,14 @@ func TestV068RecognizedErroneousDeclarations(t *testing.T) {
 		}, []v068Expected{{3, 1, 6, "Найдено этапов: 1."}}},
 		{"unknown interval does not suppress finding", []model.Line{
 			v068TestTag(t, "task", "identifier", "practice", 2, 1),
+			v068TestTag(t, "step", "title", "Read", 3, 2),
 			v068TestInvalid(t, "@unknown", 3, 2), v068TestTag(t, "endtask", "", "", 3, 2),
-		}, []v068Expected{{3, 1, 6, "Найдено этапов: 0."}}},
+		}, []v068Expected{{3, 1, 6, "Найдено этапов: 1."}}},
 		{"recognized task without ID still opens area", []model.Line{
 			v068TestBroken(t, v068TestTag(t, "task", "", "", 2, 1), "?"),
+			v068TestTag(t, "step", "title", "Read", 3, 2),
 			v068TestTag(t, "endtask", "", "", 3, 2),
-		}, []v068Expected{{3, 1, 6, "Найдено этапов: 0."}}},
+		}, []v068Expected{{3, 1, 6, "Найдено этапов: 1."}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v068TestRun(t, v068TestDocument(t, tc.body...), "current", tc.want)

@@ -13,7 +13,7 @@ type v068Task struct {
 	line, start, end, steps int
 }
 
-// registrationV068 регистрирует дополнительный минимум этапов для DSL 1.2.
+// registrationV068 регистрирует минимум этапов для заданий DSL 1.2 с @step.
 func registrationV068(registry *diagnostics.Registry) error {
 	return registry.Register(diagnostics.Definition{
 		Code:     "V068",
@@ -26,6 +26,7 @@ func registrationV068(registry *diagnostics.Registry) error {
 }
 
 // checkV068 считает структурные этапы каждой области задания независимо.
+// Задания без этапов не подлежат проверке минимального числа @step.
 // Физические переходы между variant учитываются и при общем родителе
 // variants у объявления ветви и её заданий. Включения не раскрываются.
 func checkV068(lines diagnostics.Lines, findings diagnostics.Findings) error {
@@ -53,10 +54,10 @@ func checkV068(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	return v068Report(task, findings)
 }
 
-// v068Report выдаёт одно сообщение на имя @task при нуле или одном этапе.
+// v068Report выдаёт одно сообщение на имя @task только при одном этапе.
 // Нулевой номер строки означает отсутствие открытого задания.
 func v068Report(task v068Task, findings diagnostics.Findings) error {
-	if task.line == 0 || task.steps >= 2 {
+	if task.line == 0 || task.steps != 1 {
 		return nil
 	}
 	_, err := findings.Add(task.line, task.start, task.line, task.end,

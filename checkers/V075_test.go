@@ -184,7 +184,7 @@ func TestV075NestedStepDoesNotChangeStage(t *testing.T) {
 			v075TagLine(t, "task", "a", "identifier", 2, 1), v075Open(t, "text", 3, 2),
 			v075TagLine(t, "step", "Fake", "title", 4, 3), v075Close(t, 4, 3),
 			v075TagLine(t, "endtask", "", "", 2, 1),
-		}, nil, "Найдено этапов: 0.", [8]int{5, 1, 5, 6, 4, 1, 4, 6}},
+		}, nil, "", [8]int{5, 1, 5, 6, 4, 1, 4, 6}},
 		{"empty outer stage retains its full range", []model.Line{
 			v075TagLine(t, "task", "a", "identifier", 2, 1), v075TagLine(t, "step", "Real", "title", 3, 2),
 			v075Open(t, "text", 4, 3), v075TagLine(t, "step", "Fake", "title", 5, 4), v075Close(t, 5, 4),
