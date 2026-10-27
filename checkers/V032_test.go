@@ -187,6 +187,8 @@ func TestV032LiteralAndOtherContent(t *testing.T) {
 		v032Line(t, "@header a/b", "tag", 2, 1, v032Element(t, "tag", "@header", "header", 1), v032Element(t, "title", "a/b", "a/b", 9)),
 		v032Line(t, "", "blank", 2, 1))
 	v032Run(t, result, "current", nil, 1)
+	// Новый запуск добавляет ссылки, сохраняя ссылки и историю предыдущего.
+	v032Run(t, result, "second", nil, 1)
 }
 
 func TestV032NestedAndMultipleTasks(t *testing.T) {
