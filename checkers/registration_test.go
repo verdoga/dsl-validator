@@ -6,6 +6,8 @@ import (
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 	dslversions "github.com/verdoga/dsl-validator/dsl-versions"
+	"github.com/verdoga/dsl-validator/model"
+	"github.com/verdoga/dsl-validator/validator"
 )
 
 func TestRegistrationPreservesMergedDiagnostics(t *testing.T) {
@@ -27,6 +29,31 @@ func TestRegistrationPreservesMergedDiagnostics(t *testing.T) {
 		if !slices.ContainsFunc(definitions, func(d diagnostics.Definition) bool { return d.Code == code }) {
 			t.Errorf("merged diagnostic %s is missing from DSL 1.2", code)
 		}
+	}
+}
+
+func TestRegistrationPrepareIncludesApplicableCatalog(t *testing.T) {
+	registry, err := diagnostics.NewRegistry(RegistrationCheckers())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range dslversions.Supported() {
+		t.Run(string(version), func(t *testing.T) {
+			// Недоступный исходник не требует придумывать DSL для каждой версии.
+			text := string(version)
+			result := &model.Result{
+				Format: model.FormatVersion1,
+				Document: model.Document{DSLVersion: &text,
+					Metadata: model.DocumentMetadata{ResourceDirs: []string{}}},
+				Processing: []model.Processing{}, Lines: []model.Line{}, Diagnostics: []model.Diagnostic{},
+			}
+			want := registrationDefinitions(t, registry, version)
+			got, err := validator.Prepare(result, registry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertRegistrationDefinitions(t, got, want)
+		})
 	}
 }
 

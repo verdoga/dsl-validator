@@ -226,8 +226,8 @@ func v178TestRun(t *testing.T, result *model.Result, processingID string, want [
 	if v178TestSnapshot(t, result) != before {
 		t.Fatal("Prepare changed input")
 	}
-	if len(checks) != 198 {
-		t.Fatalf("catalogue size = %d, want 198", len(checks))
+	if !slices.ContainsFunc(checks, func(d diagnostics.Definition) bool { return d.Code == "V178" }) {
+		t.Fatal("V178 is missing from the prepared catalog")
 	}
 	result.Processing = append(result.Processing, model.Processing{ID: processingID, Tool: "dsl-validator"})
 	if err := validator.Run(result, checks, processingID); err != nil {

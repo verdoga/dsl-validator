@@ -225,8 +225,8 @@ func v165TestRun(t *testing.T, result *model.Result, processingID string, want [
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if len(checks) != 198 {
-		t.Fatalf("catalog size = %d, want 198", len(checks))
+	if !slices.ContainsFunc(checks, func(d diagnostics.Definition) bool { return d.Code == "V165" }) {
+		t.Fatal("V165 is missing from the prepared catalog")
 	}
 	if v165TestSnapshot(t, result) != before {
 		t.Fatal("Prepare changed input")

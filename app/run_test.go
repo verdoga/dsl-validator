@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/verdoga/dsl-validator/checkers"
 	"github.com/verdoga/dsl-validator/console"
 	"github.com/verdoga/dsl-validator/diagnostics"
+	"github.com/verdoga/dsl-validator/model"
 	"github.com/verdoga/dsl-validator/storage"
 	"github.com/verdoga/dsl-validator/validator"
 )
@@ -91,19 +93,35 @@ func TestRunProcessesJSONAndPreservesHistory(t *testing.T) {
 		if err := validator.CheckModel(saved); err != nil {
 			t.Fatal(err)
 		}
-		if len(saved.Processing) != len(previous.Processing)+1 || len(saved.Diagnostics) != 0 {
+		if len(saved.Processing) != len(previous.Processing)+1 || len(saved.Diagnostics) != len(previous.Diagnostics)+1 {
 			t.Fatal("unexpected processing or diagnostic count")
 		}
 		current := saved.Processing[len(saved.Processing)-1]
 		if current.Tool != "dsl-validator" || current.Version == nil || *current.Version != "dev" || current.StartedAt == nil || current.DurationMs == nil || *current.DurationMs < 0 {
 			t.Fatalf("invalid processing entry: %+v", current)
 		}
-		want := runReportStart(t) + fmt.Sprintf("ОБРАБОТАН %q, сохранён: да, строк: 4, ошибок: 0, проблем: 0, рекомендаций: 0, время: %d мс\n", path, *current.DurationMs) +
-			"ИТОГО: всего: 1, обработано: 1, сбоев: 0, сохранено: 1, ошибок: 0, проблем: 0, рекомендаций: 0\n"
+		// Каждый запуск сохраняет новую V201, не меняя прежние рекомендации.
+		entry := saved.Diagnostics[len(previous.Diagnostics)]
+		location := model.Location{Start: model.Position{Line: 3, Column: 3}, End: model.Position{Line: 3, Column: 9}}
+		if entry.ID == "" || entry.Source != current.ID || entry.DiagnosticCode != "V201" ||
+			entry.SeverityLevel != "recommendation" || entry.DiagnosticScope != "element" || entry.Fatal ||
+			entry.Message != "Не все буквы заголовка первого уровня прописные." ||
+			entry.Location == nil || *entry.Location != location || len(entry.RelatedLocations) != 0 {
+			t.Fatalf("unexpected heading recommendation: %+v", entry)
+		}
+		oldLinks := previous.Lines[2].Elements[1].ErrorIDs
+		wantLinks := append(append([]string{}, oldLinks...), entry.ID)
+		if !slices.Equal(saved.Lines[2].Elements[1].ErrorIDs, wantLinks) {
+			t.Fatalf("title links = %v, want %v", saved.Lines[2].Elements[1].ErrorIDs, wantLinks)
+		}
+		want := runReportStart(t) + fmt.Sprintf("ОБРАБОТАН %q, сохранён: да, строк: 4, ошибок: 0, проблем: 0, рекомендаций: 1, время: %d мс\n", path, *current.DurationMs) +
+			"ИТОГО: всего: 1, обработано: 1, сбоев: 0, сохранено: 1, ошибок: 0, проблем: 0, рекомендаций: 1\n"
 		if output != want {
 			t.Fatalf("stdout = %q, want %q", output, want)
 		}
 		saved.Processing = saved.Processing[:len(previous.Processing)]
+		saved.Diagnostics = saved.Diagnostics[:len(previous.Diagnostics)]
+		saved.Lines[2].Elements[1].ErrorIDs = saved.Lines[2].Elements[1].ErrorIDs[:len(oldLinks)]
 		if processingSnapshot(t, saved) != processingSnapshot(t, previous) {
 			t.Fatal("document, lines or previous history changed")
 		}

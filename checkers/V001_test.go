@@ -2,6 +2,7 @@ package checkers
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"unicode/utf8"
 
@@ -225,8 +226,8 @@ func TestV001RepeatedRunsPreserveHistory(t *testing.T) {
 	result := v001Document(t, v001Text(t, "Read  this   sentence.", 2, 1))
 	v001Run(t, result, "first", [][3]int{{3, 5, 7}, {3, 11, 14}}, 1)
 	v001Run(t, result, "second", [][3]int{{3, 5, 7}, {3, 11, 14}}, 1)
-	// Каждый запуск добавляет две V001 и одну V037; история обоих сохраняется.
-	if len(result.Diagnostics) != 6 || len(result.Processing) != 3 {
+	// Каждый запуск добавляет две V001, одну V037 и одну V201; история обоих сохраняется.
+	if len(result.Diagnostics) != 8 || len(result.Processing) != 3 {
 		t.Fatalf("after two runs: diagnostics=%d, processing=%d", len(result.Diagnostics), len(result.Processing))
 	}
 	// Новый документ после двух запусков не наследует накопленные срабатывания.
@@ -391,6 +392,21 @@ func v001Run(t *testing.T, result *model.Result, processingID string, want [][3]
 	previous.Document.HasErrors = oldDocumentError
 	previous.Processing = result.Processing[:processingCount]
 	previous.Diagnostics = result.Diagnostics[:diagnosticCount]
+	// В снимке исключаются новые ссылки других элементных диагностик каталога.
+	newElementIDs := make(map[string]bool)
+	for _, entry := range result.Diagnostics[len(previous.Diagnostics):] {
+		if entry.DiagnosticScope == "element" && entry.DiagnosticCode != "V001" {
+			newElementIDs[entry.ID] = true
+		}
+	}
+	previous.Lines = append([]model.Line{}, previous.Lines...)
+	for i := range previous.Lines {
+		previous.Lines[i].Elements = append([]model.Element{}, previous.Lines[i].Elements...)
+		for j := range previous.Lines[i].Elements {
+			element := &previous.Lines[i].Elements[j]
+			element.ErrorIDs = slices.DeleteFunc(slices.Clone(element.ErrorIDs), func(id string) bool { return newElementIDs[id] })
+		}
+	}
 	if v001Snapshot(t, &previous) != before {
 		t.Fatal("document, lines, error flags, element links or previous history changed")
 	}

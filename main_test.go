@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/verdoga/dsl-validator/checkers"
@@ -134,13 +135,29 @@ func mainSavedReport(t *testing.T, path string, previous *model.Result, version 
 	if err := validator.CheckModel(saved); err != nil {
 		t.Fatal(err)
 	}
-	if len(saved.Processing) != len(previous.Processing)+1 || len(saved.Diagnostics) != 0 {
+	if len(saved.Processing) != len(previous.Processing)+1 || len(saved.Diagnostics) != len(previous.Diagnostics)+1 {
 		t.Fatal("unexpected processing or diagnostic count")
 	}
 	current := saved.Processing[len(saved.Processing)-1]
 	if current.Tool != "dsl-validator" || current.Version == nil || *current.Version != version || current.StartedAt == nil || current.DurationMs == nil || *current.DurationMs < 0 {
 		t.Fatalf("invalid processing entry: %+v", current)
 	}
+	// Исходный # Unit 1 даёт ровно одну новую рекомендацию на весь title.
+	entry := saved.Diagnostics[len(previous.Diagnostics)]
+	location := model.Location{Start: model.Position{Line: 3, Column: 3}, End: model.Position{Line: 3, Column: 9}}
+	if entry.ID == "" || entry.Source != current.ID || entry.DiagnosticCode != "V201" ||
+		entry.SeverityLevel != "recommendation" || entry.DiagnosticScope != "element" || entry.Fatal ||
+		entry.Message != "Не все буквы заголовка первого уровня прописные." ||
+		entry.Location == nil || *entry.Location != location || len(entry.RelatedLocations) != 0 {
+		t.Fatalf("unexpected heading recommendation: %+v", entry)
+	}
+	oldLinks := previous.Lines[2].Elements[1].ErrorIDs
+	wantLinks := append(append([]string{}, oldLinks...), entry.ID)
+	if !slices.Equal(saved.Lines[2].Elements[1].ErrorIDs, wantLinks) {
+		t.Fatalf("title links = %v, want %v", saved.Lines[2].Elements[1].ErrorIDs, wantLinks)
+	}
+	saved.Diagnostics = saved.Diagnostics[:len(previous.Diagnostics)]
+	saved.Lines[2].Elements[1].ErrorIDs = saved.Lines[2].Elements[1].ErrorIDs[:len(oldLinks)]
 	saved.Processing = saved.Processing[:len(previous.Processing)]
 	before, err := json.Marshal(previous)
 	if err != nil {
@@ -161,8 +178,8 @@ func mainSavedReport(t *testing.T, path string, previous *model.Result, version 
 	if version == "1.0.0" {
 		banner = "dsl-validator v1.0.0\n"
 	}
-	return banner + fmt.Sprintf("Зарегистрировано диагностик: %d\nОБРАБОТАН %q, сохранён: да, строк: 4, ошибок: 0, проблем: 0, рекомендаций: 0, время: %d мс\n", registry.Len(), path, *current.DurationMs) +
-		"ИТОГО: всего: 1, обработано: 1, сбоев: 0, сохранено: 1, ошибок: 0, проблем: 0, рекомендаций: 0\n"
+	return banner + fmt.Sprintf("Зарегистрировано диагностик: %d\nОБРАБОТАН %q, сохранён: да, строк: 4, ошибок: 0, проблем: 0, рекомендаций: 1, время: %d мс\n", registry.Len(), path, *current.DurationMs) +
+		"ИТОГО: всего: 1, обработано: 1, сбоев: 0, сохранено: 1, ошибок: 0, проблем: 0, рекомендаций: 1\n"
 }
 
 // mainValidJSON — полный документ с обычным текстом и историей разбора.
