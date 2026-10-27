@@ -158,6 +158,8 @@ func TestV046NamesAndContexts(t *testing.T) {
 			v046Element(t, "tag", "@text", "text", 1, 6), v046Element(t, "title", "A\tB", "A\tB", 7, 10),
 			v046Element(t, "block-open", "{", "{", 11, 12)), v046Text(t, "Read.", 3, 2), v046Close(t, 3, 2))
 		v046Run(t, result, "current", nil)
+		// Повторный запуск сохраняет прежние ссылки и добавляет новые.
+		v046Run(t, result, "second", nil)
 	})
 }
 
@@ -631,8 +633,8 @@ func v046Snapshot(t *testing.T, result *model.Result) string {
 }
 
 // v046Run проверяет V046 через штатный каталог и конвейер. Диапазоны want
-// заданы независимо. Сохраняются исходные данные, история и ссылки элементов;
-// добавляются только Processing/Diagnostics и флаги ошибок строк и документа.
+// заданы независимо. Сохраняются исходные данные, история и прежние ссылки.
+// Новые ссылки других диагностик проверяются по их диапазонам и через CheckModel.
 func v046Run(t *testing.T, result *model.Result, processingID string, want []v046Expected) {
 	t.Helper()
 	before := v046Snapshot(t, result)
