@@ -24,7 +24,7 @@ func registrationV149(registry *diagnostics.Registry) error {
 func checkV149(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		line, _ := lines.Line(number)
-		if !v149MultifillContent(lines, line) || v149InitialAnswer(line.Raw()) {
+		if !v149MultifillContent(lines, line) {
 			continue
 		}
 		if err := v149CheckLine(line.Raw(), number, findings); err != nil {
@@ -64,60 +64,92 @@ func v149InitialAnswer(raw string) bool {
 }
 
 // v149CheckLine проверяет одну физическую строку, не перенося состояние дальше.
-// mayOpen разрешает первую группу после пяти '_' либо очередную альтернативу.
 // Диапазоны отмечают исходный White_Space в Unicode-колонках [start,end) с 1.
 func v149CheckLine(text string, number int, findings diagnostics.Findings) error {
 	raw := []rune(text)
-	inAnswer, mayOpen := false, false
+	checkFirstGap := !v149InitialAnswer(text)
 	for index := 0; index < len(raw); {
-		if mayOpen {
-			end := index
-			for end < len(raw) && unicode.Is(unicode.White_Space, raw[end]) {
-				end++
-			}
-			mayOpen = false
-			if end < len(raw) && raw[end] == '{' {
-				if end > index {
-					if _, err := findings.Add(number, index+1, number, end+1,
-						"Запишите ответ непосредственно после пропуска: _____{ANSWER}"); err != nil {
-						return err
-					}
-				}
-				inAnswer, index = true, end+1
-				continue
-			}
-		}
 		if raw[index] == '\\' && index+1 < len(raw) {
 			switch raw[index+1] {
 			case '\\', '{', '}':
 				index += 2
 				continue
 			case '_':
-				if !inAnswer {
-					index += 2
-					for index < len(raw) && raw[index] == '_' {
-						index++
-					}
-					continue
+				index += 2
+				for index < len(raw) && raw[index] == '_' {
+					index++
 				}
+				continue
 			}
 		}
-		if inAnswer {
-			if raw[index] == '}' {
-				inAnswer, mayOpen = false, true
-			}
+		if raw[index] != '_' {
 			index++
 			continue
 		}
-		if raw[index] == '_' {
-			start := index
-			for index < len(raw) && raw[index] == '_' {
-				index++
-			}
-			mayOpen = index-start == 5
+		start := index
+		for index < len(raw) && raw[index] == '_' {
+			index++
+		}
+		if index-start != 5 {
 			continue
 		}
-		index++
+		gapStart := index
+		for index < len(raw) && unicode.Is(unicode.White_Space, raw[index]) {
+			index++
+		}
+		if index == len(raw) || raw[index] != '{' {
+			continue
+		}
+		opening := index
+		if checkFirstGap && opening > gapStart {
+			if _, err := findings.Add(number, gapStart+1, number, opening+1,
+				"Запишите ответ непосредственно после пропуска: _____{ANSWER}"); err != nil {
+				return err
+			}
+		}
+		var valid bool
+		index, valid = v149GroupEnd(raw, opening)
+		// Альтернативы продолжают только корректно начатую цепочку _____{…}.
+		inChain := valid && opening == gapStart
+		for index < len(raw) {
+			gapStart, opening = index, index
+			for opening < len(raw) && unicode.Is(unicode.White_Space, raw[opening]) {
+				opening++
+			}
+			if opening == len(raw) || raw[opening] != '{' {
+				break
+			}
+			index, valid = v149GroupEnd(raw, opening)
+			inChain = inChain && valid
+			if inChain && opening > gapStart {
+				if _, err := findings.Add(number, gapStart+1, number, opening+1,
+					"Запишите ответ непосредственно после пропуска: _____{ANSWER}"); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	return nil
+}
+
+// v149GroupEnd возвращает позицию после первой неэкранированной } либо len(raw).
+// valid истинен только для закрытой группы без вложенной неэкранированной {.
+func v149GroupEnd(raw []rune, opening int) (end int, valid bool) {
+	valid = true
+	for index := opening + 1; index < len(raw); index++ {
+		if raw[index] == '\\' && index+1 < len(raw) {
+			switch raw[index+1] {
+			case '\\', '{', '}':
+				index++
+				continue
+			}
+		}
+		switch raw[index] {
+		case '{':
+			valid = false
+		case '}':
+			return index + 1, valid
+		}
+	}
+	return len(raw), false
 }

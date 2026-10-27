@@ -776,3 +776,234 @@ func TestV182LiteralOwnership(t *testing.T) {
 		})
 	}
 }
+
+// v182TestFragments задаёт два готовых content и исходный промежуток между ними.
+func v182TestFragments(t *testing.T, raw, values [2]string, gap string, inline bool, parent int) model.Line {
+	t.Helper()
+	prefix, kind := "", model.LineType("content")
+	var elements []model.Element
+	if inline {
+		prefix, kind = "@answer ", "tag"
+		elements = append(elements, v182TestElement(t, "tag", "@answer", "answer", 1))
+	}
+	start := utf8.RuneCountInString(prefix) + 1
+	elements = append(elements, v182TestElement(t, "content", raw[0], values[0], start),
+		v182TestElement(t, "content", raw[1], values[1], start+utf8.RuneCountInString(raw[0]+gap)))
+	return v182TestLine(t, prefix+raw[0]+gap+raw[1], kind, parent, elements...)
+}
+
+// v182TestFragmentDocument размещает inline-ответ на строке 5, блочный — на 6.
+func v182TestFragmentDocument(t *testing.T, answer model.Line, lower ...model.Line) *model.Result {
+	t.Helper()
+	body := []model.Line{v182TestText(t, "A", "A", 3)}
+	if answer.LineType == "tag" {
+		body = append(body, answer)
+	} else {
+		body = append(body, v182TestOpen(t, "answer", "", "", 3), answer, v182TestClose(t, 5))
+	}
+	body = append(body, v182TestSeparator(t, "---", 3, false))
+	return v182TestBlockDocument(t, "ordering", append(body, lower...)...)
+}
+
+func TestV182CompositeNormalization(t *testing.T) {
+	for _, inline := range []bool{true, false} {
+		parent := 5
+		if inline {
+			parent = 3
+		}
+		for _, tc := range []struct {
+			name, answerGap, positionGap string
+			answer, position             [2]string
+			missing                      bool
+		}{
+			{"space", " ", "\t", [2]string{" FiRst!", "PLACE2? "}, [2]string{"FIRST", "place2"}, false},
+			{"tab", "\t", "\u00a0", [2]string{" FiRst!", "PLACE2? "}, [2]string{"FIRST", "place2"}, false},
+			{"NBSP", "\u00a0", "\u2003", [2]string{" FiRst!", "PLACE2? "}, [2]string{"FIRST", "place2"}, false},
+			{"EM SPACE", "\u2003", " ", [2]string{" FiRst!", "PLACE2? "}, [2]string{"FIRST", "place2"}, false},
+			{"adjacent fragments", "", "", [2]string{"Fi", "rst!"}, [2]string{"F", "IRST"}, false},
+			{"digits retained", " ", "\u2003", [2]string{"First!", "place2?"}, [2]string{"FIRST", "place"}, true},
+		} {
+			t.Run(tc.name+"/inline="+strconv.FormatBool(inline), func(t *testing.T) {
+				answer := v182TestFragments(t, [2]string{"Left", "Right"}, tc.answer, tc.answerGap, inline, parent)
+				position := v182TestFragments(t, [2]string{"Other", "Label"}, tc.position, tc.positionGap, false, 3)
+				var want []v182TestWant
+				if tc.missing {
+					want = []v182TestWant{{[3]int{6, 1, 11}, nil}}
+					if inline {
+						want = []v182TestWant{{[3]int{5, 9, 19}, nil}}
+					}
+				}
+				v182TestRun(t, v182TestFragmentDocument(t, answer, position), "current", want)
+			})
+		}
+	}
+}
+
+func TestV182CompositeNormalizationAgainstSingleContent(t *testing.T) {
+	for _, inline := range []bool{true, false} {
+		parent := 5
+		if inline {
+			parent = 3
+		}
+		for _, gap := range []string{" ", "\t", "\u00a0", "\u2003"} {
+			t.Run("inline="+strconv.FormatBool(inline)+"/"+strconv.Quote(gap), func(t *testing.T) {
+				answer := v182TestFragments(t, [2]string{"Left", "Right"}, [2]string{" FiRst!", "PLACE2? "}, gap, inline, parent)
+				v182TestRun(t, v182TestFragmentDocument(t, answer, v182TestText(t, "FIRST place2", "FIRST place2", 3)), "answer", nil)
+				position := v182TestFragments(t, [2]string{"Other", "Label"}, [2]string{"FIRST", "place2"}, gap, false, 3)
+				answer = v182TestText(t, "first PLACE2!", "first PLACE2!", 5)
+				if inline {
+					answer = v182TestTag(t, "answer", "first PLACE2!", "content", 3)
+				}
+				v182TestRun(t, v182TestFragmentDocument(t, answer, position), "position", nil)
+			})
+		}
+	}
+}
+
+func TestV182CompositeSourceRanges(t *testing.T) {
+	t.Run("inline uses complete raw Unicode span", func(t *testing.T) {
+		answer := v182TestLine(t, "\t@answer \\{星\\}\u00a0Raw \t", "tag", 3,
+			v182TestElement(t, "tag", "@answer", "answer", 2),
+			v182TestElement(t, "content", `\{星\}`, "{Missing!}", 10),
+			v182TestElement(t, "content", "Raw", "VALUE?", 16))
+		v182TestRun(t, v182TestFragmentDocument(t, answer, v182TestText(t, "First", "First", 3)), "current",
+			[]v182TestWant{{[3]int{5, 10, 19}, nil}})
+	})
+	t.Run("block primary and related retain independent raw spans", func(t *testing.T) {
+		first := v182TestLine(t, " \t\\{星\\}\u00a0Raw \t", "content", 5,
+			v182TestElement(t, "content", `\{星\}`, "{Missing!}", 3),
+			v182TestElement(t, "content", "Raw", "VALUE?", 9))
+		related := v182TestLine(t, "\tM\\{X\\}\u2003Tail ", "content", 5,
+			v182TestElement(t, "content", `M\{X\}`, "MISSING", 2),
+			v182TestElement(t, "content", "Tail", "value", 9))
+		other := v182TestLine(t, "\tOther\tThing! ", "content", 5,
+			v182TestElement(t, "content", "Other", "Other", 2),
+			v182TestElement(t, "content", "Thing!", "thing!", 8))
+		result := v182TestBlockDocument(t, "ordering", v182TestText(t, "A", "A", 3),
+			v182TestOpen(t, "answer", "", "", 3), first, related, other, v182TestClose(t, 5),
+			v182TestSeparator(t, "---", 3, false), v182TestText(t, "First", "First", 3))
+		v182TestRun(t, result, "current", []v182TestWant{
+			{[3]int{6, 3, 12}, [][3]int{{7, 2, 13}}}, {[3]int{8, 2, 14}, nil},
+		})
+	})
+}
+
+func TestV182CompositeEmptyValues(t *testing.T) {
+	for _, inline := range []bool{true, false} {
+		parent := 7
+		if inline {
+			parent = 3
+		}
+		for _, gap := range []string{"", " ", "\t", "\u00a0", "\u2003"} {
+			t.Run("later empty answer/inline="+strconv.FormatBool(inline)+"/"+strconv.Quote(gap), func(t *testing.T) {
+				empty := v182TestFragments(t, [2]string{"Left", "Right"}, [2]string{"", ""}, gap, inline, parent)
+				body := []model.Line{v182TestText(t, "A", "A", 3), v182TestTag(t, "answer", "Earlier missing", "content", 3),
+					v182TestText(t, "B", "B", 3)}
+				if inline {
+					body = append(body, empty)
+				} else {
+					body = append(body, v182TestOpen(t, "answer", "", "", 3),
+						v182TestText(t, "Missing", "Missing", 7), v182TestText(t, "MISSING!", "MISSING!", 7), empty, v182TestClose(t, 7))
+				}
+				body = append(body, v182TestSeparator(t, "---", 3, false), v182TestText(t, "First", "First", 3))
+				v182TestRun(t, v182TestBlockDocument(t, "ordering", body...), "current", nil)
+			})
+		}
+		for _, mark := range []string{"", "\u200b", "\u200d"} {
+			t.Run("empty fragments in position/inline="+strconv.FormatBool(inline)+"/"+strconv.Quote(mark), func(t *testing.T) {
+				answerParent := 5
+				if inline {
+					answerParent = 3
+				}
+				answer := v182TestFragments(t, [2]string{"Left", "Right"}, [2]string{"Left", "Right"}, " ", inline, answerParent)
+				position := v182TestFragments(t, [2]string{"Left", "Right"}, [2]string{"", mark}, " ", false, 3)
+				want := []v182TestWant{{[3]int{6, 1, 11}, nil}}
+				if inline {
+					want = []v182TestWant{{[3]int{5, 9, 19}, nil}}
+				}
+				v182TestRun(t, v182TestFragmentDocument(t, answer, position), "current", want)
+			})
+		}
+		for _, value := range []string{"First", "\u200b", "\u200d"} {
+			t.Run("empty first fragment/inline="+strconv.FormatBool(inline)+"/"+strconv.Quote(value), func(t *testing.T) {
+				answerParent := 5
+				if inline {
+					answerParent = 3
+				}
+				answer := v182TestFragments(t, [2]string{"Left", "Right"}, [2]string{"", value}, "\u00a0", inline, answerParent)
+				var want []v182TestWant
+				if value != "First" {
+					want = []v182TestWant{{[3]int{6, 1, 11}, nil}}
+					if inline {
+						want = []v182TestWant{{[3]int{5, 9, 19}, nil}}
+					}
+				}
+				v182TestRun(t, v182TestFragmentDocument(t, answer, v182TestText(t, "First", "First", 3)), "current", want)
+			})
+		}
+	}
+}
+
+func TestV182CompositeUnknownFragments(t *testing.T) {
+	for _, inline := range []bool{true, false} {
+		for _, position := range []bool{false, true} {
+			for _, gap := range []string{"?", "\u200b", "\u200d", "unparsed"} {
+				t.Run("inline="+strconv.FormatBool(inline)+"/position="+strconv.FormatBool(position)+"/"+gap, func(t *testing.T) {
+					parent := 5
+					if inline || position {
+						parent = 3
+					}
+					unknownGap := gap
+					if gap == "unparsed" {
+						unknownGap = "?"
+					}
+					unknown := v182TestFragments(t, [2]string{"Left", "Right"}, [2]string{"First", "place"}, unknownGap, inline && !position, parent)
+					if gap == "unparsed" {
+						last := len(unknown.Elements) - 1
+						fragment := v182TestElement(t, "unparsed", "?", "", unknown.Elements[last-1].End)
+						unknown.Elements = slices.Insert(unknown.Elements, last, fragment)
+					}
+					answer, lower := unknown, v182TestText(t, "Other", "Other", 3)
+					if position {
+						answer = v182TestTag(t, "answer", "Missing", "content", 3)
+						if !inline {
+							answer = v182TestText(t, "Missing", "Missing", 5)
+						}
+						lower = unknown
+					}
+					v182TestRun(t, v182TestFragmentDocument(t, answer, lower), "current", nil)
+				})
+			}
+		}
+	}
+}
+
+func TestV182CompositeValuesAreNotDecodedAgain(t *testing.T) {
+	for _, inline := range []bool{true, false} {
+		for _, reverse := range []bool{false, true} {
+			t.Run("inline="+strconv.FormatBool(inline)+"/reverse="+strconv.FormatBool(reverse), func(t *testing.T) {
+				parent := 5
+				if inline {
+					parent = 3
+				}
+				answerRaw, answerValue, positionRaw, positionValue := `\\\\`, `\\`, `\\`, `\`
+				if reverse {
+					answerRaw, answerValue, positionRaw, positionValue = positionRaw, positionValue, answerRaw, answerValue
+				}
+				answer := v182TestFragments(t, [2]string{answerRaw, answerRaw}, [2]string{answerValue, answerValue}, "\u00a0", inline, parent)
+				position := v182TestFragments(t, [2]string{positionRaw, positionRaw}, [2]string{positionValue, positionValue}, "\u2003", false, 3)
+				want := []v182TestWant{{[3]int{6, 1, 10}, nil}}
+				if inline {
+					want = []v182TestWant{{[3]int{5, 9, 18}, nil}}
+				}
+				if reverse {
+					want = []v182TestWant{{[3]int{6, 1, 6}, nil}}
+					if inline {
+						want = []v182TestWant{{[3]int{5, 9, 14}, nil}}
+					}
+				}
+				v182TestRun(t, v182TestFragmentDocument(t, answer, position), "current", want)
+			})
+		}
+	}
+}

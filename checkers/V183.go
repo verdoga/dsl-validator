@@ -41,7 +41,8 @@ func checkV183(lines diagnostics.Lines, findings diagnostics.Findings) error {
 				separator, count = index, count+1
 			}
 		}
-		if count != 1 || !v183Answered(children[:separator], bodies) {
+		answers, answered := v183Answered(children[:separator], bodies)
+		if count != 1 || !answered {
 			continue
 		}
 		var labels []v183Label
@@ -56,7 +57,7 @@ func checkV183(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			}
 		}
 		if known {
-			if err := v183Report(labels, findings); err != nil {
+			if err := v183Report(labels, answers, findings); err != nil {
 				return err
 			}
 		}
@@ -121,36 +122,39 @@ func v183Tag(line diagnostics.Line) string {
 }
 
 // v183Answered подтверждает полные связи каждого отдельного элемента с answer.
-// Все альтернативы должны быть известны и непусты; один hint после ответа допустим.
-func v183Answered(upper []diagnostics.Line, bodies []v183Body) bool {
+// Возвращает альтернативы в порядке исходника, если все известны и непусты.
+// Один hint после ответа допустим.
+func v183Answered(upper []diagnostics.Line, bodies []v183Body) ([]v183Label, bool) {
+	var answers []v183Label
 	for index := 0; index < len(upper); {
 		label, ordinary, known := v183Text(upper[index])
 		if !known || !ordinary || answerPrimary(label.text) == "" || index+1 == len(upper) {
-			return false
+			return nil, false
 		}
 		answer := upper[index+1]
 		if v183Tag(answer) != "answer" || (answer.Type() != "tag" && answer.Type() != "block-start") {
-			return false
+			return nil, false
 		}
 		rows, inline := []diagnostics.Line{answer}, answer.Type() == "tag"
 		if !inline {
 			body := bodies[answer.Number()]
 			if body.broken || body.last-answer.Number() != body.size-1 {
-				return false
+				return nil, false
 			}
 			rows = body.children
 		}
 		if len(rows) == 0 {
-			return false
+			return nil, false
 		}
 		for _, row := range rows {
 			if !inline && row.Type() != "content" && row.Type() != "invalid" {
-				return false
+				return nil, false
 			}
 			value, ok := v170Text(row, inline, false)
 			if !ok || answerPrimary(value.text) == "" {
-				return false
+				return nil, false
 			}
+			answers = append(answers, v183Label(value))
 		}
 		index += 2
 		if index < len(upper) && v183Tag(upper[index]) == "hint" &&
@@ -158,7 +162,7 @@ func v183Answered(upper []diagnostics.Line, bodies []v183Body) bool {
 			index++
 		}
 	}
-	return len(upper) != 0
+	return answers, len(upper) != 0
 }
 
 // v183Text отличает обычную строку от конструкции и возвращает определимость.
@@ -254,8 +258,9 @@ func v183Unescape(raw string) (string, bool) {
 	return text.String(), true
 }
 
-// v183Report объединяет повторы по полному сравнению ответов.
-func v183Report(labels []v183Label, findings diagnostics.Findings) error {
+// v183Report объединяет повторы по полному сравнению ответов и уникальным диапазонам.
+// Related: остальные позиции, затем совпавшие альтернативы в порядке исходника.
+func v183Report(labels, answers []v183Label, findings diagnostics.Findings) error {
 	var groups [][]v183Label
 	for _, label := range labels {
 		found := false
@@ -279,11 +284,15 @@ func v183Report(labels []v183Label, findings diagnostics.Findings) error {
 		if err != nil {
 			return err
 		}
-		for index, label := range group {
-			if index != 1 {
-				if err := findings.AddRelated(occurrence, label.line, label.start, label.line, label.end); err != nil {
-					return err
-				}
+		seen := map[[3]int]bool{{main.line, main.start, main.end}: true}
+		for _, label := range append(group, answers...) {
+			rangeKey := [3]int{label.line, label.start, label.end}
+			if seen[rangeKey] || !answerEqual(group[0].text, label.text) {
+				continue
+			}
+			seen[rangeKey] = true
+			if err := findings.AddRelated(occurrence, label.line, label.start, label.line, label.end); err != nil {
+				return err
 			}
 		}
 	}

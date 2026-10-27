@@ -123,28 +123,53 @@ func v181CheckAnswer(rows []diagnostics.Line, block bool, limit string, findings
 
 // v181Number читает обработанное значение и исходный диапазон [start,end).
 // Пустая строка результата означает, что answerPosition не распознал номер.
-// Смежные фрагменты content составляют одно значение; промежутки между ними
-// не удаляются ради получения числа. Экранирование повторно не обрабатывается.
+// Фрагменты content соединяются с исходными пробельными промежутками;
+// непокрытый непробельный текст делает значение неизвестным.
+// Экранирование повторно не обрабатывается.
 func v181Number(line diagnostics.Line) (string, int, int) {
+	raw := []rune(line.Raw())
 	var text strings.Builder
-	start, end := 0, 0
+	start, end, cursor := 0, 0, 0
 	for index := 0; index < line.ElementCount(); index++ {
 		element, _ := line.Element(index)
 		if element.Type() == "tag" && start == 0 {
+			if strings.TrimSpace(string(raw[cursor:element.Start()-1])) != "" {
+				return "", 0, 0
+			}
+			cursor = element.End() - 1
 			continue
 		}
-		if element.Type() != "content" || start != 0 && element.Start() != end {
+		if element.Type() != "content" {
 			return "", 0, 0
 		}
 		value, present := element.Value()
 		if !present {
 			return "", 0, 0
 		}
+		// Пустая отметка не занимает исходник, в том числе внутри фрагмента.
+		if element.Start() == element.End() && value == "" {
+			continue
+		}
+		if gapEnd := element.Start() - 1; gapEnd > cursor {
+			gap := string(raw[cursor:gapEnd])
+			if strings.TrimSpace(gap) != "" {
+				return "", 0, 0
+			}
+			text.WriteString(gap)
+		}
 		if start == 0 {
 			start = element.Start()
 		}
-		end = element.End()
+		end = max(end, element.End())
+		cursor = max(cursor, element.End()-1)
 		text.WriteString(value)
+	}
+	if cursor < len(raw) {
+		gap := string(raw[cursor:])
+		if strings.TrimSpace(gap) != "" {
+			return "", 0, 0
+		}
+		text.WriteString(gap)
 	}
 	number, valid := answerPosition(text.String())
 	if !valid {

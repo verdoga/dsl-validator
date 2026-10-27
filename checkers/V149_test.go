@@ -66,38 +66,61 @@ func TestV149RawPatterns(t *testing.T) {
 		{"adjacent alternatives", "_____{A}{B}", "", nil},
 		{"many adjacent alternatives", "_____{A}{B}{C}{D}{E}", "", nil},
 		{"space between alternatives", "_____{A} {B}", "", [][3]int{{4, 9, 10}}},
-		{"first and second group separated", "_____ {A} {B}", "", [][3]int{{4, 6, 7}, {4, 10, 11}}},
+		{"two gaps between alternatives", "_____{A} {B} {C}", "", [][3]int{{4, 9, 10}, {4, 13, 14}}},
+		{"first and second group separated", "_____ {A} {B}", "", [][3]int{{4, 6, 7}}},
 		{"spaces and tab between groups", "_____{A}  {B}\t{C}", "", [][3]int{{4, 9, 11}, {4, 14, 15}}},
 		{"later alternative", "_____{A}{B} {C}", "", [][3]int{{4, 12, 13}}},
+		{"confirmed gap before unclosed alternative", "_____{A} {B} {C", "", [][3]int{{4, 9, 10}}},
+		{"confirmed gap before invalid alternative", "_____{A} {B} {C{D} {E}", "", [][3]int{{4, 9, 10}}},
 		{"text ends chain", "_____{A} text {B}", "", nil},
 		{"punctuation ends chain", "_____{A}, {B}", "", nil},
 		{"two placeholders", "_____ {A} _____ {B}", "", [][3]int{{4, 6, 7}, {4, 16, 17}}},
+		{"two independent alternative chains", "_____{A} {B} _____{C} {D}", "", [][3]int{{4, 9, 10}, {4, 22, 23}}},
+		{"invalid chain before independent chain", "_____{A{B} {C} _____{D} {E}", "", [][3]int{{4, 24, 25}}},
+		{"invalid chain after independent chain", "_____{A} {B} _____{C{D} {E}", "", [][3]int{{4, 9, 10}}},
 		{"ordinary then checked placeholder", "_____ text _____ {B}", "", [][3]int{{4, 17, 18}}},
 		{"one underscore", "_ {A}", "", nil},
 		{"four underscores", "____ {A}", "", nil},
 		{"six underscores", "______ {A}", "", nil},
 		{"ten underscores", "__________ {A}", "", nil},
+		{"six underscores cannot start alternatives", "______{A} {B}", "", nil},
+		{"ten underscores cannot start alternatives", "__________{A} {B}", "", nil},
 		{"no opening", "_____   ", "", nil},
 		{"no placeholder", "text {A} {B}", "", nil},
 		{"escaped run", `\_____ {A}`, "_____ {A}", nil},
+		{"escaped run cannot start alternatives", `\_____{A} {B}`, "_____{A} {B}", nil},
 		{"escaped longer run", `\______ {A}`, "______ {A}", nil},
 		{"fully literal form", `\_____\{A\}`, "_____{A}", nil},
 		{"paired backslashes", `\\_____ {A}`, `\_____ {A}`, [][3]int{{4, 8, 9}}},
+		{"paired backslashes before alternatives", `\\_____{A} {B}`, `\_____{A} {B}`, [][3]int{{4, 11, 12}}},
 		{"three backslashes", `\\\_____ {A}`, `\_____ {A}`, nil},
 		{"escaped remainder of run", `_\_____ {A}`, "______ {A}", nil},
+		{"escaped underscore cannot complete run", `____\_{A} {B}`, "_____{A} {B}", nil},
+		{"escaped underscore after run", `_____\_{A} {B}`, "______{A} {B}", nil},
 		{"escaped first brace", `_____ \{A}`, "_____ {A}", nil},
 		{"escaped alternative brace", `_____{A} \{B}`, "_____{A} {B}", nil},
+		{"escaped alternative brace ends chain", `_____{A} \{B} {C}`, "_____{A} {B} {C}", nil},
 		{"escaped braces break chain", `_____\{A\} {B}`, "_____{A} {B}", nil},
+		{"escaped braces inside answer", `_____{A\{B\}} {C}`, "_____{A{B}} {C}", [][3]int{{4, 14, 15}}},
+		{"escaped closing brace inside answer", `_____{A\}B} {C}`, "_____{A}B} {C}", [][3]int{{4, 12, 13}}},
 		{"answer interior", "_____{_____ {A}}", "", nil},
 		{"malformed answer interior", "_____ {_____ {A}}", "", [][3]int{{4, 6, 7}}},
-		{"alternative interior", "_____{A} {_____ {B}}", "", [][3]int{{4, 9, 10}}},
+		{"alternative interior", "_____{A} {_____ {B}}", "", nil},
+		{"nested first answer ends chain", "_____{A{B} {C}", "", nil},
+		{"nested alternative ends chain", "_____{A} {B{C} {D}", "", nil},
 		{"escaped close is data", `_____{\}_____ {A}}`, "_____{}_____ {A}}", nil},
 		{"escaped slash allows close", `_____{A\\} {B}`, `_____{A\} {B}`, [][3]int{{4, 11, 12}}},
+		{"escaped alternative close is data", `_____{A} {B\}`, "_____{A} {B}", nil},
+		{"escaped data before alternative close", `_____{A} {B\}C}`, "_____{A} {B}C}", [][3]int{{4, 9, 10}}},
 		{"first close without nesting", "_____{A{B} _____ {C}", "", [][3]int{{4, 17, 18}}},
 		{"empty first answer", "_____{} {B}", "", [][3]int{{4, 8, 9}}},
+		{"empty alternative", "_____{A} {}", "", [][3]int{{4, 9, 10}}},
 		{"unclosed separated answer", "_____ {A", "", [][3]int{{4, 6, 7}}},
-		{"unclosed alternative", "_____{A} {B", "", [][3]int{{4, 9, 10}}},
+		{"unclosed alternative", "_____{A} {B", "", nil},
 		{"Unicode prefix", "Я🙂 _____ {A}", "", [][3]int{{4, 9, 10}}},
+		{"Unicode alternative range", "Я🙂_____{A}\u00a0 \u2003{B}", "", [][3]int{{4, 11, 14}}},
+		{"decoded value cannot remove raw gap", "_____{A} {B}", "_____{A}{B}", [][3]int{{4, 9, 10}}},
+		{"decoded value cannot add raw gap", "_____{A}{B}", "_____{A} {B}", nil},
 		{"indent and trailing whitespace", " \t_____ {A} \t", "", [][3]int{{4, 8, 9}}},
 		{"zero width space is not White_Space", "_____\u200b{A}", "", nil},
 		{"BOM is not White_Space", "_____\ufeff{A}", "", nil},
@@ -123,7 +146,10 @@ func TestV149WhiteSpaceCharacters(t *testing.T) {
 		t.Run(fmt.Sprintf("%U", []rune(gap)[0]), func(t *testing.T) {
 			raw := "_____" + gap + "{A}" + gap + "{B}"
 			v149Run(t, v149Document(t, v149Open(t, "multifill", 2, 1), v149Text(t, raw, raw, 3, 2),
-				v149Close(t, 3, 2)), "current", [][3]int{{4, 6, 7}, {4, 10, 11}})
+				v149Close(t, 3, 2)), "current", [][3]int{{4, 6, 7}})
+			raw = "_____{A}" + gap + "{B}" + gap + "{C}"
+			v149Run(t, v149Document(t, v149Open(t, "multifill", 2, 1), v149Text(t, raw, raw, 3, 2),
+				v149Close(t, 3, 2)), "current", [][3]int{{4, 9, 10}, {4, 13, 14}})
 		})
 	}
 }
@@ -134,7 +160,15 @@ func TestV149InitialAnswerAndPseudotags(t *testing.T) {
 		want             [][3]int
 	}{
 		{"answer excluded", "@answer _____ {A}", "", nil},
+		{"answer alternatives", "@answer _____{A} {B}", "", [][3]int{{4, 17, 18}}},
+		{"answer multiple alternatives", "@answer _____{A} {B} {C}", "", [][3]int{{4, 17, 18}, {4, 21, 22}}},
+		{"answer invalid first gap", "@answer _____ {A} {B}", "", nil},
+		{"answer unclosed alternative", "@answer _____{A} {B", "", nil},
+		{"answer invalid alternative", "@answer _____{A} {B{C} {D}", "", nil},
+		{"answer Unicode gap", "@answer _____{A}\u00a0\u2003{B}", "", [][3]int{{4, 17, 19}}},
+		{"answer independently excludes first gaps", "@answer _____{A} {B} _____ {C}", "", [][3]int{{4, 17, 18}}},
 		{"indented mixed case answer", " \t@AnSwEr _____ {A}", "", nil},
+		{"indented mixed case answer alternatives", " \t@AnSwEr _____{A} {B}", "", [][3]int{{4, 19, 20}}},
 		{"answer at end", "@answer", "", nil},
 		{"tab is not name boundary", "@answer\t_____ {A}", "", [][3]int{{4, 14, 15}}},
 		{"NBSP is not name boundary", "@answer\u00a0_____ {A}", "", [][3]int{{4, 14, 15}}},
@@ -166,7 +200,11 @@ func TestV149PhysicalLines(t *testing.T) {
 		{"newline after placeholder", "_____", "{A}", nil},
 		{"trailing spaces before newline", "_____  ", " {A}", nil},
 		{"newline between alternatives", "_____{A}", " {B}", nil},
+		{"newline cannot close alternative", "_____{A} {B", "} {C}", nil},
+		{"newline after confirmed alternative", "_____{A} {B}", " {C} {D}", [][3]int{{4, 9, 10}}},
 		{"open answer reset", "_____{A", "_____ {B}", [][3]int{{5, 6, 7}}},
+		{"open answer before independent alternatives", "_____{A", "_____{B} {C}", [][3]int{{5, 9, 10}}},
+		{"invalid answer before independent alternatives", "_____{A{B}", "_____{C} {D}", [][3]int{{5, 9, 10}}},
 		{"malformed answer reset", "_____ {A", "_____ {B}", [][3]int{{4, 6, 7}, {5, 6, 7}}},
 		{"trailing backslash reset", `_____{A\`, "_____ {B}", [][3]int{{5, 6, 7}}},
 	} {
@@ -205,6 +243,8 @@ func TestV149ElementRepresentations(t *testing.T) {
 			v149Unparsed(t, " {lives}", 10, 18), v149Element(t, "content", " here.", " here.", 18, 24)), [][3]int{{4, 10, 11}}},
 		{"recognized placeholder then malformed alternative", v149Line(t, "_____{A} {B}", "invalid", 3, 2,
 			v149Element(t, "placeholder", "_____{A}", "A", 1, 9), v149Unparsed(t, " {B}", 9, 13)), [][3]int{{4, 9, 10}}},
+		{"recognized placeholder then unclosed alternative", v149Line(t, "_____{A} {B", "invalid", 3, 2,
+			v149Element(t, "placeholder", "_____{A}", "A", 1, 9), v149Unparsed(t, " {B", 9, 12)), nil},
 		{"reference split into elements", v149Line(t, "She _____{lives} here.", "content", 3, 2,
 			v149Element(t, "content", "She ", "She ", 1, 5), v149Element(t, "placeholder", "_____{lives}", "lives", 5, 17),
 			v149Element(t, "content", " here.", " here.", 17, 23)), nil},
@@ -212,6 +252,8 @@ func TestV149ElementRepresentations(t *testing.T) {
 			v149Unparsed(t, "@answer _____ {A}", 1, 18)), nil},
 		{"forbidden answer with saved tag", v149Line(t, "@answer _____ {A}", "invalid", 3, 2,
 			v149Element(t, "tag", "@answer", "answer", 1, 8), v149Unparsed(t, " _____ {A}", 8, 18)), nil},
+		{"forbidden answer alternatives with saved tag", v149Line(t, "@answer _____{A} {B}", "invalid", 3, 2,
+			v149Element(t, "tag", "@answer", "answer", 1, 8), v149Unparsed(t, " _____{A} {B}", 8, 21)), [][3]int{{4, 17, 18}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v149Run(t, v149Document(t, v149Open(t, "multifill", 2, 1), tc.line, v149Close(t, 3, 2)), "current", tc.want)
@@ -265,7 +307,7 @@ func TestV149ContextsAndBlocks(t *testing.T) {
 			v149Tag(t, "task", "identifier", "t", 4, 3), v149Tag(t, "step", "title", "Part", 5, 4),
 			v149Open(t, "multifill", 6, 5), v149Text(t, "_____ {A} {B}", "_____ {A} {B}", 7, 6), v149Close(t, 7, 6),
 			v149Tag(t, "endtask", "", "", 5, 4), v149Tag(t, "variant", "name", "B", 3, 2),
-			v149Text(t, "Read.", "Read.", 11, 3), v149Close(t, 3, 2)), "current", [][3]int{{8, 6, 7}, {8, 10, 11}})
+			v149Text(t, "Read.", "Read.", 11, 3), v149Close(t, 3, 2)), "current", [][3]int{{8, 6, 7}})
 	})
 }
 

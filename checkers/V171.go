@@ -24,7 +24,8 @@ type v171Label struct {
 	line, start, end int
 }
 
-// checkV171 не использует ответы для фильтрации групп одинаковых подписей.
+// checkV171 не использует ответы для фильтрации групп одинаковых подписей,
+// но добавляет диапазоны совпадающих альтернатив к связанным местам ошибки.
 func checkV171(lines diagnostics.Lines, findings diagnostics.Findings) error {
 	for number := 1; number <= lines.Len(); number++ {
 		block, _ := lines.Line(number)
@@ -50,9 +51,16 @@ func checkV171(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if count != 1 || !v171Automatic(lines, rows[:separator]) {
 			continue
 		}
+		var answers []v171Label
+		for _, row := range rows[:separator] {
+			if v171Tag(row) == "answer" {
+				values, _ := v171AnswerValues(lines, row)
+				answers = append(answers, values...)
+			}
+		}
 		var groups [][]v171Label
 		for _, row := range rows[separator+1:] {
-			if row.Type() != "content" || strings.Trim(row.Raw(), " \t") == "" {
+			if row.Type() != "content" {
 				continue
 			}
 			label, known := v171Text(row)
@@ -81,13 +89,22 @@ func checkV171(lines diagnostics.Lines, findings diagnostics.Findings) error {
 			if err != nil {
 				return err
 			}
-			for index, label := range group {
-				if index == 1 {
+			related := append([]v171Label{}, group...)
+			for _, answer := range answers {
+				if answerEqual(group[0].text, answer.text) {
+					related = append(related, answer)
+				}
+			}
+			seen := map[[3]int]bool{{second.line, second.start, second.end}: true}
+			for _, label := range related {
+				location := [3]int{label.line, label.start, label.end}
+				if seen[location] {
 					continue
 				}
 				if err := findings.AddRelated(occurrence, label.line, label.start, label.line, label.end); err != nil {
 					return err
 				}
+				seen[location] = true
 			}
 		}
 	}
@@ -100,15 +117,22 @@ func checkV171(lines diagnostics.Lines, findings diagnostics.Findings) error {
 func v171Automatic(lines diagnostics.Lines, rows []diagnostics.Line) bool {
 	items, pending, answered := 0, false, false
 	for _, row := range rows {
-		if strings.Trim(row.Raw(), " \t") == "" {
-			continue
-		}
 		if row.Type() == "content" {
+			label, known := v171Text(row)
+			if !known {
+				return false
+			}
+			if answerPrimary(label.text) == "" {
+				continue
+			}
 			if pending {
 				return false
 			}
 			items++
 			pending, answered = true, false
+			continue
+		}
+		if strings.Trim(row.Raw(), " \t") == "" {
 			continue
 		}
 		name := v171Tag(row)
@@ -132,25 +156,33 @@ func v171Automatic(lines diagnostics.Lines, rows []diagnostics.Line) bool {
 // Вложенные теги не создают альтернатив; неизвестная текстовая строка
 // или пустая основная форма хотя бы одной альтернативы отменяет проверку.
 func v171AnswerAvailable(lines diagnostics.Lines, answer diagnostics.Line) bool {
-	if answer.Type() == "tag" {
-		value, known := v170Text(answer, true, false)
-		return known && answerPrimary(value.text) != ""
+	_, available := v171AnswerValues(lines, answer)
+	return available
+}
+
+// v171AnswerValues сохраняет доступные альтернативы answer в порядке исходника.
+// Неизвестная или пустая основная форма отменяет все альтернативы ответа.
+func v171AnswerValues(lines diagnostics.Lines, answer diagnostics.Line) ([]v171Label, bool) {
+	inline := answer.Type() == "tag"
+	rows := []diagnostics.Line{answer}
+	if !inline {
+		if answer.Type() != "block-start" {
+			return nil, false
+		}
+		rows = v170Children(lines, answer)
 	}
-	if answer.Type() != "block-start" {
-		return false
-	}
-	found := false
-	for _, row := range v170Children(lines, answer) {
-		if row.Type() != "content" && (row.Type() != "invalid" || v171Tag(row) != "") {
+	var values []v171Label
+	for _, row := range rows {
+		if !inline && row.Type() != "content" && (row.Type() != "invalid" || v171Tag(row) != "") {
 			continue
 		}
-		value, known := v170Text(row, false, false)
+		value, known := v170Text(row, inline, false)
 		if !known || answerPrimary(value.text) == "" {
-			return false
+			return nil, false
 		}
-		found = true
+		values = append(values, v171Label{value.text, value.line, value.start, value.end})
 	}
-	return found
+	return values, len(values) != 0
 }
 
 // v171Text использует Value, только если content охватывает всю подпись.

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -39,13 +41,13 @@ func checkV184(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if closing == nil {
 			continue
 		}
-		answers, known := v184Answers(rows)
-		if !known || len(answers) < 2 {
+		items, known := v184Answers(rows)
+		if !known || len(items) < 2 {
 			continue
 		}
-		graph := make([][]int, len(answers))
-		for index, answer := range answers {
-			graph[index], known = v184Positions(answer, children[answer.Number()], len(answers))
+		graph := make([][]int, len(items))
+		for index, item := range items {
+			graph[index], known = v184Positions(item.answer, children[item.answer.Number()], len(items))
 			if !known {
 				break
 			}
@@ -53,15 +55,33 @@ func checkV184(lines diagnostics.Lines, findings diagnostics.Findings) error {
 		if !known {
 			continue
 		}
-		matched := v184MaximumMatching(graph)
+		matched, owners := v184MaximumMatching(graph)
 		if matched == len(graph) {
 			continue
 		}
 		tag := v184Element(block, "tag")
 		brace := v184Element(closing, "block-close")
-		detail := fmt.Sprintf("Одновременно удаётся разместить %d из %d элементов.", matched, len(graph))
-		if _, err := findings.Add(number, tag.Start(), closing.Number(), brace.End(), detail); err != nil {
+		group, positions := v184DeficientGroup(graph, owners)
+		labels := make([]string, len(group))
+		for index, item := range group {
+			labels[index] = fmt.Sprintf("%d «%s»", item+1, strings.TrimSpace(items[item].line.Raw()))
+		}
+		detail := fmt.Sprintf("Одновременно удаётся разместить %d из %d элементов. Дефицитная группа: элементы %s; доступно позиций: %d, требуется: %d, не хватает: %d.", matched, len(graph), strings.Join(labels, ", "), positions, len(group), len(group)-positions)
+		occurrence, err := findings.Add(number, tag.Start(), closing.Number(), brace.End(), detail)
+		if err != nil {
 			return err
+		}
+		for _, item := range group {
+			// Исходный диапазон объявления ответа имеет исключающую правую границу.
+			answer := items[item].answer
+			last, end := answer, utf8.RuneCountInString(answer.Raw())+1
+			if answer.Type() == "block-start" {
+				_, last = v184Body(answer, children[answer.Number()])
+				end = v184Element(last, "block-close").End()
+			}
+			if err := findings.AddRelated(occurrence, answer.Number(), v184Element(answer, "tag").Start(), last.Number(), end); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -84,11 +104,16 @@ func v184Body(opening diagnostics.Line, children []diagnostics.Line) (rows []dia
 	return nil, nil
 }
 
+// v184Item сохраняет отдельный исходный экземпляр и принадлежащий ему ответ.
+type v184Item struct {
+	line, answer diagnostics.Line
+}
+
 // v184Answers возвращает по одному ответу для каждого отдельного элемента.
 // false означает разделитель, неизвестный состав либо нарушение связи ответов.
-func v184Answers(rows []diagnostics.Line) ([]diagnostics.Line, bool) {
-	var answers []diagnostics.Line
-	pending := false
+func v184Answers(rows []diagnostics.Line) ([]v184Item, bool) {
+	var answers []v184Item
+	var pending diagnostics.Line
 	for _, row := range rows {
 		text := strings.Trim(row.Raw(), " \t")
 		if text == "---" {
@@ -99,14 +124,14 @@ func v184Answers(rows []diagnostics.Line) ([]diagnostics.Line, bool) {
 		}
 		name := v184Tag(row)
 		if name == "answer" {
-			if !pending {
+			if pending == nil {
 				return nil, false
 			}
-			answers = append(answers, row)
-			pending = false
+			answers = append(answers, v184Item{line: pending, answer: row})
+			pending = nil
 			continue
 		}
-		if pending {
+		if pending != nil {
 			// Следующая значимая конструкция обязана быть ответом.
 			return nil, false
 		}
@@ -116,9 +141,9 @@ func v184Answers(rows []diagnostics.Line) ([]diagnostics.Line, bool) {
 		if row.Type() != "content" || v184HasUnparsed(row) {
 			return nil, false
 		}
-		pending = true
+		pending = row
 	}
-	return answers, !pending
+	return answers, pending == nil
 }
 
 // v184Positions возвращает непустое множество позиций с нулевой индексацией.
@@ -167,24 +192,59 @@ func v184Positions(answer diagnostics.Line, children []diagnostics.Line, count i
 }
 
 // v184Number нормализует обработанное значение без повторного декодирования.
+// Непокрытые тегом и известными content фрагменты допускают лишь пробелы Unicode.
 // Ноль означает неизвестное значение, неверную запись либо выход из 1…limit.
 func v184Number(line diagnostics.Line, limit string) int {
 	var text strings.Builder
-	end := 0
+	raw := []rune(line.Raw())
+	end := 1
+	hasContent := false
+	writeGap := func(start int) bool {
+		if start < end {
+			return false
+		}
+		gap := raw[end-1 : start-1]
+		for _, char := range gap {
+			if !unicode.IsSpace(char) {
+				return false
+			}
+		}
+		text.WriteString(string(gap))
+		return true
+	}
 	for index := 0; index < line.ElementCount(); index++ {
 		element, _ := line.Element(index)
-		if element.Type() == "tag" && end == 0 {
+		start, next := element.Start(), element.End()
+		if start < 1 || next < start || next > len(raw)+1 {
+			return 0
+		}
+		if element.Type() == "tag" && !hasContent {
+			if !writeGap(start) {
+				return 0
+			}
+			end = next
 			continue
 		}
-		if element.Type() != "content" || end != 0 && element.Start() != end {
+		if element.Type() != "content" {
 			return 0
 		}
 		value, present := element.Value()
 		if !present {
 			return 0
 		}
+		// Пустая аннотация не занимает исходный текст и не меняет его покрытие.
+		if start == next && value == "" {
+			continue
+		}
+		if !writeGap(start) {
+			return 0
+		}
 		text.WriteString(value)
-		end = element.End()
+		end = next
+		hasContent = true
+	}
+	if !writeGap(len(raw) + 1) {
+		return 0
 	}
 	number, known := answerPosition(text.String())
 	if !known {
@@ -207,18 +267,59 @@ func v184Blank(line diagnostics.Line) bool {
 }
 
 // v184MaximumMatching находит максимум, сохраняя отдельные экземпляры элементов.
-func v184MaximumMatching(graph [][]int) int {
-	owners := make([]int, len(graph))
+// owners содержит индекс элемента для позиции либо -1 для свободной позиции.
+func v184MaximumMatching(graph [][]int) (matched int, owners []int) {
+	owners = make([]int, len(graph))
 	for index := range owners {
 		owners[index] = -1
 	}
-	matched := 0
 	for item := range graph {
 		if v184Augment(item, graph, owners, make([]bool, len(graph))) {
 			matched++
 		}
 	}
-	return matched
+	return matched, owners
+}
+
+// v184DeficientGroup обходит чередующиеся рёбра от несопоставленных элементов.
+// Возвращает исходные индексы группы по возрастанию и число доступных позиций.
+func v184DeficientGroup(graph [][]int, owners []int) ([]int, int) {
+	matched := make([]bool, len(graph))
+	for _, item := range owners {
+		if item >= 0 {
+			matched[item] = true
+		}
+	}
+	seenItems, seenPositions := make([]bool, len(graph)), make([]bool, len(graph))
+	var queue []int
+	for item := range graph {
+		if !matched[item] {
+			seenItems[item] = true
+			queue = append(queue, item)
+		}
+	}
+	positions := 0
+	for next := 0; next < len(queue); next++ {
+		item := queue[next]
+		for _, position := range graph[item] {
+			if owners[position] == item || seenPositions[position] {
+				continue
+			}
+			seenPositions[position] = true
+			positions++
+			if owner := owners[position]; owner >= 0 && !seenItems[owner] {
+				seenItems[owner] = true
+				queue = append(queue, owner)
+			}
+		}
+	}
+	var group []int
+	for item, seen := range seenItems {
+		if seen {
+			group = append(group, item)
+		}
+	}
+	return group, positions
 }
 
 // v184Augment ищет увеличивающий путь; true означает увеличение паросочетания.
