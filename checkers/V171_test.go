@@ -30,7 +30,7 @@ func TestV171ReferenceAndExample(t *testing.T) {
 			[]model.Line{v171TestText(t, "Да", "Да", 3, 2), v171TestText(t, "Нет", "Нет", 3, 2)}, nil},
 		{"example", "@matching {\nСолнце — звезда?\n@answer Да\n---\nДа\nда\n}",
 			[]model.Line{v171TestText(t, "Солнце — звезда?", "Солнце — звезда?", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)},
-			[]model.Line{v171TestText(t, "Да", "Да", 3, 2), v171TestText(t, "да", "да", 3, 2)}, []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}}},
+			[]model.Line{v171TestText(t, "Да", "Да", 3, 2), v171TestText(t, "да", "да", 3, 2)}, []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}, {5, 9, 11}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := v171TestMatching(t, tc.upper, tc.lower...)
@@ -53,12 +53,12 @@ func TestV171Groups(t *testing.T) {
 		want         []v171Expected
 	}{
 		{"unique", "Да", []string{"Да", "Нет"}, nil},
-		{"three occurrences", "Да", []string{"Да", "да", "ДА"}, []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}, {9, 1, 3}}}}},
-		{"two groups", "Да", []string{"Да", "да", "Нет", "нет"}, []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}, {10, 1, 4, [][3]int{{9, 1, 4}}}}},
-		{"interleaved groups ordered by second occurrence", "Да", []string{"Да", "Нет", "нет", "да"}, []v171Expected{{9, 1, 4, [][3]int{{8, 1, 4}}}, {10, 1, 3, [][3]int{{7, 1, 3}}}}},
+		{"three occurrences", "Да", []string{"Да", "да", "ДА"}, []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}, {9, 1, 3}, {5, 9, 11}}}}},
+		{"two groups", "Да", []string{"Да", "да", "Нет", "нет"}, []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}, {5, 9, 11}}}, {10, 1, 4, [][3]int{{9, 1, 4}}}}},
+		{"interleaved groups ordered by second occurrence", "Да", []string{"Да", "Нет", "нет", "да"}, []v171Expected{{9, 1, 4, [][3]int{{8, 1, 4}}}, {10, 1, 3, [][3]int{{7, 1, 3}, {5, 9, 11}}}}},
 		{"unused duplicate", "Нет", []string{"Нет", "Да", "да"}, []v171Expected{{9, 1, 3, [][3]int{{8, 1, 3}}}}},
-		{"answer matches primary and additional targets", "Yes", []string{"Yes", "YES!"}, []v171Expected{{8, 1, 5, [][3]int{{7, 1, 4}}}}},
-		{"answer matches additional and primary targets", "Yes", []string{"YES!", "Yes"}, []v171Expected{{8, 1, 4, [][3]int{{7, 1, 5}}}}},
+		{"answer matches primary and additional targets", "Yes", []string{"Yes", "YES!"}, []v171Expected{{8, 1, 5, [][3]int{{7, 1, 4}, {5, 9, 12}}}}},
+		{"answer matches additional and primary targets", "Yes", []string{"YES!", "Yes"}, []v171Expected{{8, 1, 4, [][3]int{{7, 1, 5}, {5, 9, 12}}}}},
 		{"unused normalized duplicate", "Нет", []string{"Нет", "Yes", "YES!"}, []v171Expected{{9, 1, 5, [][3]int{{8, 1, 4}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -69,6 +69,78 @@ func TestV171Groups(t *testing.T) {
 			v171TestRun(t, v171TestMatching(t, []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", tc.answer, 3, 2)}, lower...), "current", tc.want)
 		})
 	}
+}
+
+func TestV171SemanticContent(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		item, first, second model.Line
+		inline, block       []v171Expected
+	}{
+		{"lower whitespace Raw has known Value", v171TestText(t, "Question", "Question", 3, 2),
+			v171TestText(t, " \t", "Yes", 3, 2), v171TestText(t, "YES!", "YES!", 3, 2),
+			[]v171Expected{{8, 1, 5, [][3]int{{7, 1, 3}, {5, 9, 12}}}},
+			[]v171Expected{{10, 1, 5, [][3]int{{9, 1, 3}, {6, 1, 4}}}}},
+		{"primary lower whitespace Raw keeps source range", v171TestText(t, "Question", "Question", 3, 2),
+			v171TestText(t, "YES!", "YES!", 3, 2), v171TestText(t, " \t", "Yes", 3, 2),
+			[]v171Expected{{8, 1, 3, [][3]int{{7, 1, 5}, {5, 9, 12}}}},
+			[]v171Expected{{10, 1, 3, [][3]int{{9, 1, 5}, {6, 1, 4}}}}},
+		{"upper whitespace Raw keeps answer attachment", v171TestText(t, " \t", "Question", 3, 2),
+			v171TestText(t, "Yes", "Yes", 3, 2), v171TestText(t, "YES!", "YES!", 3, 2),
+			[]v171Expected{{8, 1, 5, [][3]int{{7, 1, 4}, {5, 9, 12}}}},
+			[]v171Expected{{10, 1, 5, [][3]int{{9, 1, 4}, {6, 1, 4}}}}},
+		{"empty upper Value does not create an item", v171TestText(t, "Question", "", 3, 2),
+			v171TestText(t, "Yes", "Yes", 3, 2), v171TestText(t, "YES!", "YES!", 3, 2), nil, nil},
+		{"empty lower Value does not create a duplicate", v171TestText(t, "Question", "Question", 3, 2),
+			v171TestText(t, "Yes", "", 3, 2), v171TestText(t, "YES!", "YES!", 3, 2), nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, answer := range []struct {
+				name  string
+				upper []model.Line
+				want  []v171Expected
+			}{
+				{"inline answer", []model.Line{tc.item, v171TestTag(t, "answer", "content", "Yes", 3, 2)}, tc.inline},
+				{"block answer", []model.Line{tc.item, v171TestOpen(t, "answer", 3, 2), v171TestText(t, "Yes", "Yes", 5, 3), v171TestClose(t, 5, 3)}, tc.block},
+			} {
+				t.Run(answer.name, func(t *testing.T) {
+					v171TestRun(t, v171TestMatching(t, answer.upper, tc.first, tc.second), "current", answer.want)
+				})
+			}
+		})
+	}
+}
+
+func TestV171RelatedAnswerRanges(t *testing.T) {
+	t.Run("inline answer trims source whitespace", func(t *testing.T) {
+		answer := v171TestLine(t, " \t@answer \tYes \t", "tag", 3, 2,
+			v171TestElement(t, "tag", "@answer", "answer", 3, 10),
+			v171TestElement(t, "content", "Yes", "Yes", 12, 15))
+		upper := []model.Line{v171TestText(t, "Question", "Question", 3, 2), answer}
+		v171TestRun(t, v171TestMatching(t, upper, v171TestText(t, "Yes", "Yes", 3, 2),
+			v171TestText(t, "YES!", "YES!", 3, 2), v171TestText(t, "yes", "yes", 3, 2)), "current",
+			[]v171Expected{{8, 1, 5, [][3]int{{7, 1, 4}, {9, 1, 4}, {5, 12, 15}}}})
+	})
+	t.Run("block alternatives keep Unicode source ranges and order", func(t *testing.T) {
+		upper := []model.Line{v171TestText(t, "Question", "Question", 3, 2), v171TestOpen(t, "answer", 3, 2),
+			v171TestText(t, " \t🌞Yes! \t", "🌞Yes!", 5, 3), v171TestText(t, "Нет", "Нет", 5, 3),
+			v171TestText(t, "\t🌞yes", "🌞yes", 5, 3), v171TestClose(t, 5, 3)}
+		v171TestRun(t, v171TestMatching(t, upper, v171TestText(t, "🌞Yes", "🌞Yes", 3, 2),
+			v171TestText(t, "🌞YES!", "🌞YES!", 3, 2), v171TestText(t, "🌞yes", "🌞yes", 3, 2)), "current",
+			[]v171Expected{{12, 1, 6, [][3]int{{11, 1, 5}, {13, 1, 5}, {6, 3, 8}, {8, 2, 6}}}})
+	})
+	t.Run("mixed answers link once after all other lower occurrences", func(t *testing.T) {
+		upper := []model.Line{v171TestText(t, "First", "First", 3, 2), v171TestTag(t, "answer", "content", "YES!", 3, 2),
+			v171TestText(t, "Second", "Second", 3, 2), v171TestOpen(t, "answer", 3, 2),
+			v171TestText(t, "No", "No", 7, 3), v171TestText(t, "yes", "yes", 7, 3), v171TestText(t, "yes?", "yes?", 7, 3), v171TestClose(t, 7, 3),
+			v171TestText(t, "Third", "Third", 3, 2), v171TestTag(t, "answer", "content", "Yes", 3, 2)}
+		v171TestRun(t, v171TestMatching(t, upper, v171TestText(t, "Yes", "Yes", 3, 2),
+			v171TestText(t, "YES!", "YES!", 3, 2), v171TestText(t, "yEs?", "yEs?", 3, 2),
+			v171TestText(t, "No", "No", 3, 2), v171TestText(t, "NO!", "NO!", 3, 2)), "current", []v171Expected{
+			{16, 1, 5, [][3]int{{15, 1, 4}, {17, 1, 5}, {5, 9, 13}, {9, 1, 4}, {10, 1, 5}, {13, 9, 12}}},
+			{19, 1, 4, [][3]int{{18, 1, 3}, {8, 1, 3}}},
+		})
+	})
 }
 
 func TestV171AutomaticMode(t *testing.T) {
@@ -87,18 +159,18 @@ func TestV171AutomaticMode(t *testing.T) {
 		{"no answers", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2)}, nil, 0},
 		{"partial answers", []model.Line{v171TestText(t, "Первый", "Первый", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2), v171TestText(t, "Второй", "Второй", 3, 2)}, nil, 0},
 		{"first item unanswered", []model.Line{v171TestText(t, "Первый", "Первый", 3, 2), v171TestText(t, "Второй", "Второй", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)}, nil, 0},
-		{"all items answered", []model.Line{v171TestText(t, "Первый", "Первый", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2), v171TestText(t, "Второй", "Второй", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)}, []v171Expected{{10, 1, 3, [][3]int{{9, 1, 3}}}}, 0},
+		{"all items answered", []model.Line{v171TestText(t, "Первый", "Первый", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2), v171TestText(t, "Второй", "Второй", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)}, []v171Expected{{10, 1, 3, [][3]int{{9, 1, 3}, {5, 9, 11}, {7, 9, 11}}}}, 0},
 		{"repeated answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)}, nil, 0},
 		{"repeat after hint", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2), v171TestTag(t, "hint", "content", "Подумайте.", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)}, nil, 0},
 		{"no upper items", nil, nil, 3},
 		{"orphan answer only", []model.Line{v171TestTag(t, "answer", "content", "Да", 3, 2)}, nil, 4},
-		{"blank between item and answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestBlank(t, " \t", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)}, []v171Expected{{9, 1, 3, [][3]int{{8, 1, 3}}}}, 0},
+		{"blank between item and answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestBlank(t, " \t", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)}, []v171Expected{{9, 1, 3, [][3]int{{8, 1, 3}, {6, 9, 11}}}}, 0},
 		{"hint before answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "hint", "content", "Подумайте.", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)}, nil, 5},
 		{"inline editor interrupts", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "editor", "content", "Комментарий", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)}, nil, 5},
 		{"block editor interrupts", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestOpen(t, "editor", 3, 2), v171TestText(t, "@answer Да", "@answer Да", 5, 3), v171TestClose(t, 5, 3), v171TestTag(t, "answer", "content", "Да", 3, 2)}, nil, 5},
 		{"foreign block interrupts", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestOpen(t, "note", 3, 2), v171TestText(t, "Замечание", "Замечание", 5, 3), v171TestClose(t, 5, 3), v171TestTag(t, "answer", "content", "Да", 3, 2)}, nil, 5},
-		{"block answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestOpen(t, "answer", 3, 2), v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, "Нет", "Нет", 5, 3), v171TestClose(t, 5, 3)}, []v171Expected{{11, 1, 3, [][3]int{{10, 1, 3}}}}, 0},
-		{"block hint after answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2), v171TestOpen(t, "hint", 3, 2), v171TestText(t, "Подумайте.", "Подумайте.", 6, 3), v171TestClose(t, 6, 3)}, []v171Expected{{11, 1, 3, [][3]int{{10, 1, 3}}}}, 0},
+		{"block answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestOpen(t, "answer", 3, 2), v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, "Нет", "Нет", 5, 3), v171TestClose(t, 5, 3)}, []v171Expected{{11, 1, 3, [][3]int{{10, 1, 3}, {6, 1, 3}}}}, 0},
+		{"block hint after answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2), v171TestOpen(t, "hint", 3, 2), v171TestText(t, "Подумайте.", "Подумайте.", 6, 3), v171TestClose(t, 6, 3)}, []v171Expected{{11, 1, 3, [][3]int{{10, 1, 3}, {5, 9, 11}}}}, 0},
 		{"empty answer disables automatic mode", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "", "", 3, 2)}, nil, 5},
 		{"empty content answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", "", 3, 2)}, nil, 0},
 		{"ASCII whitespace answer", []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestTag(t, "answer", "content", " \t", 3, 2)}, nil, 0},
@@ -139,27 +211,27 @@ func TestV171BlockAnswerAvailability(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		alternatives []model.Line
-		available    bool
+		want         []v171Expected
 	}{
-		{"all alternatives available", []model.Line{v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, "Нет", "Нет", 5, 3)}, true},
-		{"empty block", nil, false},
-		{"blank block", []model.Line{v171TestBlank(t, " \t", 5, 3)}, false},
-		{"blank lines around alternative", []model.Line{v171TestBlank(t, "", 5, 3), v171TestText(t, "Да", "Да", 5, 3), v171TestBlank(t, "\t", 5, 3)}, true},
-		{"ASCII whitespace first alternative", []model.Line{v171TestText(t, " \t", " \t", 5, 3), v171TestText(t, "Да", "Да", 5, 3)}, false},
-		{"ASCII whitespace last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, " \t", " \t", 5, 3)}, false},
-		{"whitespace unparsed first alternative", []model.Line{whitespaceUnparsed, v171TestText(t, "Да", "Да", 5, 3)}, false},
-		{"whitespace unparsed last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), whitespaceUnparsed}, false},
-		{"ASCII whitespace raw with known value", []model.Line{v171TestText(t, " \t", "Да", 5, 3)}, true},
-		{"empty first alternative", []model.Line{v171TestText(t, "\u00a0\u2003", "\u00a0\u2003", 5, 3), v171TestText(t, "Да", "Да", 5, 3)}, false},
-		{"empty last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, "\u00a0\u2003", "\u00a0\u2003", 5, 3)}, false},
-		{"unknown first alternative", []model.Line{unknown, v171TestText(t, "Да", "Да", 5, 3)}, false},
-		{"unknown last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), unknown}, false},
-		{"unparsed first alternative", []model.Line{unparsed, v171TestText(t, "Да", "Да", 5, 3)}, false},
-		{"unparsed last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), unparsed}, false},
-		{"partial first alternative", []model.Line{partial, v171TestText(t, "Да", "Да", 5, 3)}, false},
-		{"partial last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), partial}, false},
-		{"tag is not an alternative", []model.Line{v171TestTag(t, "hint", "content", "Да", 5, 3)}, false},
-		{"punctuation alternative remains available", []model.Line{v171TestText(t, "!", "!", 5, 3)}, true},
+		{"all alternatives available", []model.Line{v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, "Нет", "Нет", 5, 3)}, []v171Expected{{11, 1, 3, [][3]int{{10, 1, 3}, {6, 1, 3}}}}},
+		{"empty block", nil, nil},
+		{"blank block", []model.Line{v171TestBlank(t, " \t", 5, 3)}, nil},
+		{"blank lines around alternative", []model.Line{v171TestBlank(t, "", 5, 3), v171TestText(t, "Да", "Да", 5, 3), v171TestBlank(t, "\t", 5, 3)}, []v171Expected{{12, 1, 3, [][3]int{{11, 1, 3}, {7, 1, 3}}}}},
+		{"ASCII whitespace first alternative", []model.Line{v171TestText(t, " \t", " \t", 5, 3), v171TestText(t, "Да", "Да", 5, 3)}, nil},
+		{"ASCII whitespace last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, " \t", " \t", 5, 3)}, nil},
+		{"whitespace unparsed first alternative", []model.Line{whitespaceUnparsed, v171TestText(t, "Да", "Да", 5, 3)}, nil},
+		{"whitespace unparsed last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), whitespaceUnparsed}, nil},
+		{"ASCII whitespace raw with known value", []model.Line{v171TestText(t, " \t", "Да", 5, 3)}, []v171Expected{{10, 1, 3, [][3]int{{9, 1, 3}, {6, 3, 3}}}}},
+		{"empty first alternative", []model.Line{v171TestText(t, "\u00a0\u2003", "\u00a0\u2003", 5, 3), v171TestText(t, "Да", "Да", 5, 3)}, nil},
+		{"empty last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), v171TestText(t, "\u00a0\u2003", "\u00a0\u2003", 5, 3)}, nil},
+		{"unknown first alternative", []model.Line{unknown, v171TestText(t, "Да", "Да", 5, 3)}, nil},
+		{"unknown last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), unknown}, nil},
+		{"unparsed first alternative", []model.Line{unparsed, v171TestText(t, "Да", "Да", 5, 3)}, nil},
+		{"unparsed last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), unparsed}, nil},
+		{"partial first alternative", []model.Line{partial, v171TestText(t, "Да", "Да", 5, 3)}, nil},
+		{"partial last alternative", []model.Line{v171TestText(t, "Да", "Да", 5, 3), partial}, nil},
+		{"tag is not an alternative", []model.Line{v171TestTag(t, "hint", "content", "Да", 5, 3)}, nil},
+		{"punctuation alternative remains available", []model.Line{v171TestText(t, "!", "!", 5, 3)}, []v171Expected{{10, 1, 3, [][3]int{{9, 1, 3}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			upper := []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestOpen(t, "answer", 3, 2)}
@@ -168,11 +240,6 @@ func TestV171BlockAnswerAvailability(t *testing.T) {
 				upper = append(upper, alternative)
 			}
 			upper = append(upper, v171TestClose(t, 5, 3))
-			first := len(upper) + 5
-			var want []v171Expected
-			if tc.available {
-				want = []v171Expected{{first + 1, 1, 3, [][3]int{{first, 1, 3}}}}
-			}
 			result := v171TestMatching(t, upper, v171TestText(t, "Да", "Да", 3, 2), v171TestText(t, "да", "да", 3, 2))
 			for _, line := range result.Lines {
 				for index, element := range line.Elements {
@@ -181,7 +248,7 @@ func TestV171BlockAnswerAvailability(t *testing.T) {
 					}
 				}
 			}
-			v171TestRun(t, result, "current", want)
+			v171TestRun(t, result, "current", tc.want)
 		})
 	}
 }
@@ -197,7 +264,7 @@ func TestV171PartialLabelDoesNotCreateDuplicate(t *testing.T) {
 			var want []v171Expected
 			if completeDuplicate {
 				lower = append(lower, v171TestText(t, "apple", "apple", 3, 2))
-				want = []v171Expected{{9, 1, 6, [][3]int{{8, 1, 6}}}}
+				want = []v171Expected{{9, 1, 6, [][3]int{{8, 1, 6}, {5, 9, 14}}}}
 			}
 			upper := []model.Line{v171TestText(t, "Fruit", "Fruit", 3, 2), v171TestTag(t, "answer", "content", "Apple", 3, 2)}
 			result := v171TestMatching(t, upper, lower...)
@@ -295,7 +362,7 @@ func TestV171LabelsAndEscaping(t *testing.T) {
 				first.Elements = []model.Element{}
 				second.Elements = []model.Element{}
 			}
-			v171TestRun(t, v171TestMatching(t, v171TestUpper(t), first, second), "current", []v171Expected{{8, 2, 4, [][3]int{{7, 3, 5}}}})
+			v171TestRun(t, v171TestMatching(t, v171TestUpper(t), first, second), "current", []v171Expected{{8, 2, 4, [][3]int{{7, 3, 5}, {5, 9, 11}}}})
 		})
 	}
 }
@@ -318,7 +385,7 @@ func TestV171SeparatorsAndNestedContent(t *testing.T) {
 		kind             model.LineType
 		want             []v171Expected
 	}{
-		{"ASCII edges", " \t---\t ", "---", "separator", []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}}},
+		{"ASCII edges", " \t---\t ", "---", "separator", []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}, {5, 9, 11}}}}},
 		{"escaped", `\---`, "---", "content", nil},
 		{"NBSP edges", "\u00a0---\u00a0", "\u00a0---\u00a0", "content", nil},
 	} {
@@ -349,7 +416,7 @@ func TestV171SeparatorsAndNestedContent(t *testing.T) {
 			var want []v171Expected
 			if own {
 				body = append(body, v171TestLine(t, "---", "separator", 3, 2))
-				want = []v171Expected{{11, 1, 3, [][3]int{{10, 1, 3}}}}
+				want = []v171Expected{{11, 1, 3, [][3]int{{10, 1, 3}, {5, 9, 11}}}}
 			}
 			body = append(body, v171TestText(t, "Да", "Да", 3, 2), v171TestText(t, "да", "да", 3, 2), v171TestClose(t, 3, 2))
 			v171TestRun(t, v171TestDocument(t, body...), "current", want)
@@ -363,7 +430,7 @@ func TestV171SeparatorsAndNestedContent(t *testing.T) {
 	})
 	t.Run("blank lines in both lists", func(t *testing.T) {
 		v171TestRun(t, v171TestMatching(t, []model.Line{v171TestText(t, "Вопрос", "Вопрос", 3, 2), v171TestBlank(t, "", 3, 2), v171TestTag(t, "answer", "content", "Да", 3, 2)},
-			v171TestText(t, "Да", "Да", 3, 2), v171TestBlank(t, "\t", 3, 2), v171TestText(t, "да", "да", 3, 2)), "current", []v171Expected{{10, 1, 3, [][3]int{{8, 1, 3}}}})
+			v171TestText(t, "Да", "Да", 3, 2), v171TestBlank(t, "\t", 3, 2), v171TestText(t, "да", "да", 3, 2)), "current", []v171Expected{{10, 1, 3, [][3]int{{8, 1, 3}, {6, 9, 11}}}})
 	})
 	t.Run("tag content is not lower label", func(t *testing.T) {
 		result := v171TestMatching(t, v171TestUpper(t), v171TestText(t, "Да", "Да", 3, 2), v171TestTag(t, "answer", "content", "да", 3, 2), v171TestText(t, "Нет", "Нет", 3, 2))
@@ -386,7 +453,7 @@ func TestV171SeparatorsAndNestedContent(t *testing.T) {
 		*result.Document.LineCount = 8
 		result.Lines[7].LineEnding = ""
 		v171TestError(t, result, 3, -1, "Блок matching не закрыт.")
-		v171TestRun(t, result, "current", []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}})
+		v171TestRun(t, result, "current", []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}, {5, 9, 11}}}})
 	})
 }
 
@@ -397,10 +464,10 @@ func TestV171Contexts(t *testing.T) {
 		opening, parent, depth int
 		want                   []v171Expected
 	}{
-		{"task", []model.Line{v171TestTag(t, "task", "identifier", "first", 2, 1)}, []model.Line{v171TestTag(t, "endtask", "", "", 2, 1)}, 4, 3, 2, []v171Expected{{9, 1, 3, [][3]int{{8, 1, 3}}}}},
-		{"step", []model.Line{v171TestTag(t, "task", "identifier", "first", 2, 1), v171TestTag(t, "step", "title", "First", 3, 2)}, []model.Line{v171TestTag(t, "endtask", "", "", 2, 1)}, 5, 4, 3, []v171Expected{{10, 1, 3, [][3]int{{9, 1, 3}}}}},
+		{"task", []model.Line{v171TestTag(t, "task", "identifier", "first", 2, 1)}, []model.Line{v171TestTag(t, "endtask", "", "", 2, 1)}, 4, 3, 2, []v171Expected{{9, 1, 3, [][3]int{{8, 1, 3}, {6, 9, 11}}}}},
+		{"step", []model.Line{v171TestTag(t, "task", "identifier", "first", 2, 1), v171TestTag(t, "step", "title", "First", 3, 2)}, []model.Line{v171TestTag(t, "endtask", "", "", 2, 1)}, 5, 4, 3, []v171Expected{{10, 1, 3, [][3]int{{9, 1, 3}, {7, 9, 11}}}}},
 		{"variant", []model.Line{v171TestOpen(t, "variants", 2, 1), v171TestTag(t, "variant", "name", "A", 3, 2)},
-			[]model.Line{v171TestTag(t, "variant", "name", "B", 3, 2), v171TestText(t, "Читайте.", "Читайте.", 12, 3), v171TestClose(t, 3, 2)}, 5, 4, 3, []v171Expected{{10, 1, 3, [][3]int{{9, 1, 3}}}}},
+			[]model.Line{v171TestTag(t, "variant", "name", "B", 3, 2), v171TestText(t, "Читайте.", "Читайте.", 12, 3), v171TestClose(t, 3, 2)}, 5, 4, 3, []v171Expected{{10, 1, 3, [][3]int{{9, 1, 3}, {7, 9, 11}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := append(tc.prefix, v171TestOpen(t, "matching", tc.parent, tc.depth), v171TestText(t, "Вопрос", "Вопрос", tc.opening, tc.depth+1),
@@ -423,7 +490,7 @@ func TestV171Contexts(t *testing.T) {
 			}
 			var want []v171Expected
 			if repeat {
-				want = []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}, {15, 1, 3, [][3]int{{14, 1, 3}}}}
+				want = []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}, {5, 9, 11}}}, {15, 1, 3, [][3]int{{14, 1, 3}, {12, 9, 11}}}}
 			}
 			v171TestRun(t, v171TestDocument(t, body...), "current", want)
 		})
@@ -494,7 +561,7 @@ func TestV171MetadataEndingsAndHistory(t *testing.T) {
 		result.Lines[2].Number = 3
 		result.Lines[4] = v171TestLine(t, "@AnSwEr Да", "tag", 3, 2, v171TestElement(t, "tag", "@AnSwEr", "answer", 1, 8), v171TestElement(t, "content", "Да", "Да", 9, 11))
 		result.Lines[4].Number = 5
-		v171TestRun(t, result, "current", []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}})
+		v171TestRun(t, result, "current", []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}, {5, 9, 11}}}})
 	})
 	for _, ending := range []string{"LF", "CRLF", "no final newline"} {
 		t.Run(ending, func(t *testing.T) {
@@ -506,7 +573,7 @@ func TestV171MetadataEndingsAndHistory(t *testing.T) {
 					result.Lines[index].LineEnding = "\r\n"
 				}
 			}
-			want := []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}}}}
+			want := []v171Expected{{8, 1, 3, [][3]int{{7, 1, 3}, {5, 9, 11}}}}
 			v171TestRun(t, result, "first", want)
 			v171TestRun(t, result, "second", want)
 			v171TestRun(t, v171TestMatching(t, v171TestUpper(t), v171TestText(t, "Да", "Да", 3, 2), v171TestText(t, "Нет", "Нет", 3, 2)), "separate", nil)
@@ -579,6 +646,13 @@ func v171TestRun(t *testing.T, result *model.Result, source string, want []v171E
 			entry.Message != message ||
 			entry.Location == nil || *entry.Location != primary || len(entry.RelatedLocations) != len(expected.related) {
 			t.Fatalf("occurrence %d = %+v, want %+v", index, entry, expected)
+		}
+		seen := map[model.Location]bool{primary: true}
+		for _, location := range entry.RelatedLocations {
+			if seen[location] {
+				t.Fatalf("repeated primary or related location: %+v", location)
+			}
+			seen[location] = true
 		}
 		for index, related := range expected.related {
 			location := model.Location{Start: model.Position{Line: related[0], Column: related[1]}, End: model.Position{Line: related[0], Column: related[2]}}

@@ -142,7 +142,7 @@ func TestAnswerNormalizationIntegrationLists(t *testing.T) {
 			normalizationRun(t, v138Document(t, body...), []normalizationWant{
 				{tc.absent, [4]int{6, 1, 6, 10}, [][4]int{{7, 1, 7, 9}}},
 				{tc.absent, [4]int{8, 1, 8, 4}, nil}, {tc.absent, [4]int{9, 1, 9, 4}, nil},
-				{tc.duplicate, [4]int{15, 1, 15, 8}, [][4]int{{14, 1, 14, 7}}}, {"V002", [4]int{6, 4, 6, 5}, nil}})
+				{tc.duplicate, [4]int{15, 1, 15, 8}, [][4]int{{14, 1, 14, 7}, {12, 9, 12, 16}}}, {"V002", [4]int{6, 4, 6, 5}, nil}})
 		})
 	}
 }
@@ -153,7 +153,7 @@ func TestAnswerNormalizationIntegrationOrdering(t *testing.T) {
 		want                []normalizationWant
 	}{
 		{"punctuated permutation", "1.", "(2)", nil},
-		{"equal labels remain separate items", "1.", "(1)", []normalizationWant{{"V184", [4]int{3, 1, 8, 2}, nil}}},
+		{"equal labels remain separate items", "1.", "(1)", []normalizationWant{{"V184", [4]int{3, 1, 8, 2}, [][4]int{{5, 1, 5, 11}, {7, 1, 7, 12}}}}},
 		{"leading zero retained", "0!", "2", []normalizationWant{{"V180", [4]int{5, 9, 5, 11}, nil}}},
 		{"symbol retained", "+1", "2", []normalizationWant{{"V180", [4]int{5, 9, 5, 11}, nil}}},
 		{"normalized number exceeds count", "(3)", "2", []normalizationWant{{"V181", [4]int{5, 9, 5, 12}, nil}}},
@@ -179,12 +179,12 @@ func TestAnswerNormalizationIntegrationIndependentExercises(t *testing.T) {
 			var body []model.Line
 			openings, parents, depth := [2]int{3, 10}, [2]int{2, 2}, 1
 			want := []normalizationWant{{"V170", [4]int{5, 9, 5, 18}, nil}, {"V002", [4]int{5, 12, 5, 13}, nil},
-				{"V171", [4]int{8, 1, 8, 8}, [][4]int{{7, 1, 7, 7}}}, {"V171", [4]int{15, 1, 15, 10}, [][4]int{{14, 1, 14, 9}}}}
+				{"V171", [4]int{8, 1, 8, 8}, [][4]int{{7, 1, 7, 7}}}, {"V171", [4]int{15, 1, 15, 10}, [][4]int{{14, 1, 14, 9}, {12, 9, 12, 17}}}}
 			if variants {
 				openings, parents, depth = [2]int{5, 13}, [2]int{4, 12}, 3
 				body = append(body, v138Open(t, "variants", 2, 1))
 				want = []normalizationWant{{"V170", [4]int{7, 9, 7, 18}, nil}, {"V002", [4]int{7, 12, 7, 13}, nil},
-					{"V171", [4]int{10, 1, 10, 8}, [][4]int{{9, 1, 9, 7}}}, {"V171", [4]int{18, 1, 18, 10}, [][4]int{{17, 1, 17, 9}}}}
+					{"V171", [4]int{10, 1, 10, 8}, [][4]int{{9, 1, 9, 7}}}, {"V171", [4]int{18, 1, 18, 10}, [][4]int{{17, 1, 17, 9}, {15, 9, 15, 17}}}}
 			}
 			for index, opening := range openings {
 				answer, first, second := "NEW\tYORK!", "London", "LONDON!"

@@ -2,6 +2,7 @@ package checkers
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/verdoga/dsl-validator/diagnostics"
 )
@@ -307,8 +308,9 @@ func v182Compare(values []v182Value, positions []string, findings diagnostics.Fi
 	return nil
 }
 
-// v182Text предпочитает готовое Value без декодирования. Иначе восстанавливает
-// одну физическую строку по DSL 1.14, 1.21–1.22. false означает неопределимый текст.
+// v182Text собирает готовые Value без декодирования и сохраняет пробельные
+// промежутки. Только при отсутствии content восстанавливает одну физическую
+// строку по DSL 1.14, 1.21–1.22. false означает неопределимый текст.
 // inline исключает тег из диапазона; position разрешает литеральный разделитель.
 func v182Text(line diagnostics.Line, inline, position bool) (value v182Value, known bool) {
 	raw := []rune(line.Raw())
@@ -327,22 +329,44 @@ func v182Text(line diagnostics.Line, inline, position bool) (value v182Value, kn
 		end--
 	}
 	value = v182Value{line: line.Number(), start: start + 1, end: end + 1}
-	var content diagnostics.Element
-	count := 0
+	var ready strings.Builder
+	cursor, hasContent := start, false
+	appendGap := func(until int) bool {
+		if until > end {
+			until = end
+		}
+		for cursor < until {
+			if !unicode.IsSpace(raw[cursor]) {
+				return false
+			}
+			ready.WriteRune(raw[cursor])
+			cursor++
+		}
+		return true
+	}
 	for i := 0; i < line.ElementCount(); i++ {
 		element, _ := line.Element(i)
 		if element.Type() == "unparsed" {
 			return value, false
 		}
 		if element.Type() == "content" {
-			content, count = element, count+1
+			text, present := element.Value()
+			if !present || !appendGap(element.Start()-1) {
+				return value, false
+			}
+			hasContent = true
+			ready.WriteString(text)
+			if element.End()-1 > cursor {
+				cursor = element.End() - 1
+			}
 		}
 	}
-	if count == 1 && content.Start() <= start+1 && content.End() >= end+1 {
-		value.text, known = content.Value()
-		if known {
-			return value, true
+	if hasContent {
+		if !appendGap(end) {
+			return value, false
 		}
+		value.text = ready.String()
+		return value, true
 	}
 	text := raw[start:end]
 	var decoded strings.Builder

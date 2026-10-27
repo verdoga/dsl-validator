@@ -3,6 +3,7 @@ package checkers
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -78,6 +79,109 @@ func TestV184MaximumMatching(t *testing.T) {
 			items := []v184TestItem{chain[order[0]], chain[order[1]], chain[order[2]], chain[order[3]]}
 			v184TestRun(t, v184TestItems(t, items...), "current", nil)
 		})
+	}
+}
+
+func TestV184DeficientGroupDetailsAndAnswers(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		items   []v184TestItem
+		want    v184Expected
+		detail  string
+		related []model.Location
+	}{
+		{"audit inline answers", []v184TestItem{{"A", []string{"1"}, true}, {"B", []string{"1."}, true}, {"C", []string{"2", "3."}, false}},
+			v184Expected{3, 1, 13, 2, 2, 3},
+			"Одновременно удаётся разместить 2 из 3 элементов. Дефицитная группа: элементы 1 «A», 2 «B»; доступно позиций: 1, требуется: 2, не хватает: 1.",
+			[]model.Location{{Start: model.Position{Line: 5, Column: 1}, End: model.Position{Line: 5, Column: 10}}, {Start: model.Position{Line: 7, Column: 1}, End: model.Position{Line: 7, Column: 11}}}},
+		{"audit block answers", []v184TestItem{{"A", []string{"1"}, false}, {"B", []string{"1."}, false}, {"C", []string{"2", "3."}, false}},
+			v184Expected{3, 1, 17, 2, 2, 3},
+			"Одновременно удаётся разместить 2 из 3 элементов. Дефицитная группа: элементы 1 «A», 2 «B»; доступно позиций: 1, требуется: 2, не хватает: 1.",
+			[]model.Location{{Start: model.Position{Line: 5, Column: 1}, End: model.Position{Line: 7, Column: 2}}, {Start: model.Position{Line: 9, Column: 1}, End: model.Position{Line: 11, Column: 2}}}},
+		{"identical instances retain individual answers", []v184TestItem{{"A", []string{"1"}, true}, {"A", []string{"1."}, true}, {"A", []string{"2", "3."}, false}},
+			v184Expected{3, 1, 13, 2, 2, 3},
+			"Одновременно удаётся разместить 2 из 3 элементов. Дефицитная группа: элементы 1 «A», 2 «A»; доступно позиций: 1, требуется: 2, не хватает: 1.",
+			[]model.Location{{Start: model.Position{Line: 5, Column: 1}, End: model.Position{Line: 5, Column: 10}}, {Start: model.Position{Line: 7, Column: 1}, End: model.Position{Line: 7, Column: 11}}}},
+		{"augmenting path reaches every deficient item", []v184TestItem{{"A", []string{"1", "2"}, false}, {"B", []string{"1"}, true}, {"C", []string{"2"}, true}},
+			v184Expected{3, 1, 13, 2, 2, 3},
+			"Одновременно удаётся разместить 2 из 3 элементов. Дефицитная группа: элементы 1 «A», 2 «B», 3 «C»; доступно позиций: 2, требуется: 3, не хватает: 1.",
+			[]model.Location{{Start: model.Position{Line: 5, Column: 1}, End: model.Position{Line: 8, Column: 2}}, {Start: model.Position{Line: 10, Column: 1}, End: model.Position{Line: 10, Column: 10}}, {Start: model.Position{Line: 12, Column: 1}, End: model.Position{Line: 12, Column: 10}}}},
+		{"two independent deficiencies", []v184TestItem{{"A", []string{"1"}, true}, {"B", []string{"1"}, true}, {"C", []string{"3"}, true}, {"D", []string{"3"}, true}},
+			v184Expected{3, 1, 12, 2, 2, 4},
+			"Одновременно удаётся разместить 2 из 4 элементов. Дефицитная группа: элементы 1 «A», 2 «B», 3 «C», 4 «D»; доступно позиций: 2, требуется: 4, не хватает: 2.",
+			[]model.Location{{Start: model.Position{Line: 5, Column: 1}, End: model.Position{Line: 5, Column: 10}}, {Start: model.Position{Line: 7, Column: 1}, End: model.Position{Line: 7, Column: 10}}, {Start: model.Position{Line: 9, Column: 1}, End: model.Position{Line: 9, Column: 10}}, {Start: model.Position{Line: 11, Column: 1}, End: model.Position{Line: 11, Column: 10}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := v184TestRun(t, v184TestItems(t, tc.items...), "current", []v184Expected{tc.want})
+			v184TestDetail(t, got[0], tc.detail, tc.related)
+		})
+	}
+	t.Run("rune columns and complete declarations", func(t *testing.T) {
+		result := v184TestOrdering(t, v184TestText(t, " \tА🌞 ", "А🌞", 3, 2),
+			v184TestLine(t, " \t@answer (1) \u2003", "tag", 3, 2, v184TestElement(t, "tag", "@answer", "answer", 3, 10), v184TestElement(t, "content", "(1)", "(1)", 11, 14)),
+			v184TestText(t, "Б", "Б", 3, 2),
+			v184TestLine(t, "\t  @answer { ", "block-start", 3, 2, v184TestElement(t, "tag", "@answer", "answer", 4, 11), v184TestElement(t, "block-open", "{", "{", 12, 13)),
+			v184TestText(t, "1.", "1.", 7, 3), v184TestLine(t, "  } \t", "block-end", 7, 3, v184TestElement(t, "block-close", "}", "}", 3, 4)))
+		got := v184TestRun(t, result, "current", []v184Expected{{3, 1, 10, 2, 1, 2}})
+		v184TestDetail(t, got[0], "Одновременно удаётся разместить 1 из 2 элементов. Дефицитная группа: элементы 1 «А🌞», 2 «Б»; доступно позиций: 1, требуется: 2, не хватает: 1.",
+			[]model.Location{{Start: model.Position{Line: 5, Column: 3}, End: model.Position{Line: 5, Column: 16}}, {Start: model.Position{Line: 7, Column: 4}, End: model.Position{Line: 9, Column: 4}}})
+	})
+}
+
+func TestV184FragmentedAnswerGaps(t *testing.T) {
+	for _, inline := range []bool{true, false} {
+		for _, gap := range []string{" ", "\t", "\u00a0", "\u2003"} {
+			for _, number := range []string{"1", "2"} {
+				t.Run("inline="+strconv.FormatBool(inline)+"/gap="+strconv.Quote(gap)+"/number="+number, func(t *testing.T) {
+					result := v184TestFragmentedAnswer(t, inline, "("+gap+number+")",
+						v184TestElement(t, "content", "(", "(", 1, 2), v184TestElement(t, "content", number+")", number+")", 3, 5))
+					var want []v184Expected
+					if number == "1" {
+						endLine := 8
+						if !inline {
+							endLine = 10
+						}
+						want = []v184Expected{{3, 1, endLine, 2, 1, 2}}
+					}
+					v184TestRun(t, result, "current", want)
+				})
+			}
+		}
+	}
+}
+
+func TestV184FragmentedAnswerCompleteness(t *testing.T) {
+	for _, inline := range []bool{true, false} {
+		for _, tc := range []struct {
+			name, raw string
+			parts     []model.Element
+			conflict  bool
+		}{
+			{"known contiguous fragments", "(1)", []model.Element{v184TestElement(t, "content", "(", "(", 1, 2), v184TestElement(t, "content", "1)", "1)", 2, 4)}, true},
+			{"known decoded fragments", `\u0031.`, []model.Element{v184TestElement(t, "content", `\u0031`, "1", 1, 7), v184TestElement(t, "content", ".", ".", 7, 8)}, true},
+			{"known empty mark inside content", "(1)", []model.Element{v184TestElement(t, "content", "(1)", "(1)", 1, 4), v184TestElement(t, "content", "", "", 2, 2)}, true},
+			{"known whitespace prefix and suffix", "\u00a0\u20031\t ", []model.Element{v184TestElement(t, "content", "1", "1", 3, 4)}, true},
+			{"uncovered significant prefix", "x1", []model.Element{v184TestElement(t, "content", "1", "1", 2, 3)}, false},
+			{"uncovered significant suffix", "1x", []model.Element{v184TestElement(t, "content", "1", "1", 1, 2)}, false},
+			{"uncovered punctuation prefix", "!1", []model.Element{v184TestElement(t, "content", "1", "1", 2, 3)}, false},
+			{"uncovered punctuation suffix", "1!", []model.Element{v184TestElement(t, "content", "1", "1", 1, 2)}, false},
+			{"uncovered significant interior", "(x1)", []model.Element{v184TestElement(t, "content", "(", "(", 1, 2), v184TestElement(t, "content", "1)", "1)", 3, 5)}, false},
+			{"zero width space is significant", "(\u200b1)", []model.Element{v184TestElement(t, "content", "(", "(", 1, 2), v184TestElement(t, "content", "1)", "1)", 3, 5)}, false},
+			{"unknown empty mark inside content", "(1)", []model.Element{v184TestElement(t, "content", "(1)", "(1)", 1, 4), v184TestElement(t, "placeholder", "", "", 2, 2)}, false},
+			{"unresolved empty mark inside content", "(1)", []model.Element{v184TestElement(t, "content", "(1)", "(1)", 1, 4), {ElementType: "placeholder", Raw: "", Value: nil, Start: 2, End: 2, ErrorIDs: []string{}}}, false},
+		} {
+			t.Run("inline="+strconv.FormatBool(inline)+"/"+tc.name, func(t *testing.T) {
+				var want []v184Expected
+				if tc.conflict {
+					endLine := 8
+					if !inline {
+						endLine = 10
+					}
+					want = []v184Expected{{3, 1, endLine, 2, 1, 2}}
+				}
+				v184TestRun(t, v184TestFragmentedAnswer(t, inline, tc.raw, tc.parts...), "current", want)
+			})
+		}
 	}
 }
 
@@ -258,6 +362,37 @@ func TestV184UnusableAlternativeSuppressesWholeGraph(t *testing.T) {
 	}
 }
 
+func TestV184FragmentedUnknownAlternativeSuppressesWholeGraph(t *testing.T) {
+	for _, inline := range []bool{true, false} {
+		for _, tc := range []struct {
+			name, raw string
+			parts     []model.Element
+		}{
+			{"unknown value", "(unknown)", []model.Element{v184TestElement(t, "content", "(", "(", 1, 2), v184TestElement(t, "content", "unknown)", "unknown)", 2, 10)}},
+			{"out of range value", "(4)", []model.Element{v184TestElement(t, "content", "(", "(", 1, 2), v184TestElement(t, "content", "4)", "4)", 2, 4)}},
+			{"unresolved fragment", "(2)", []model.Element{v184TestElement(t, "content", "(", "(", 1, 2), {ElementType: "placeholder", Raw: "2", Value: nil, Start: 2, End: 3, ErrorIDs: []string{}}, v184TestElement(t, "content", ")", ")", 3, 4)}},
+			{"unknown empty mark inside known content", "(2)", []model.Element{v184TestElement(t, "content", "(2)", "(2)", 1, 4), v184TestElement(t, "placeholder", "", "", 2, 2)}},
+			{"unresolved empty mark inside known content", "(2)", []model.Element{v184TestElement(t, "content", "(2)", "(2)", 1, 4), {ElementType: "placeholder", Raw: "", Value: nil, Start: 2, End: 2, ErrorIDs: []string{}}}},
+		} {
+			t.Run("inline="+strconv.FormatBool(inline)+"/"+tc.name, func(t *testing.T) {
+				// Конфликт A/B обязан подавляться даже при известной части ответа C.
+				result := v184TestItems(t, v184TestItem{"A", []string{"1"}, true}, v184TestItem{"B", []string{"1."}, true}, v184TestItem{"C", []string{"2"}, inline})
+				row := 9
+				if !inline {
+					row = 10
+				}
+				result.Lines[row-1] = v184TestFragmentLine(t, inline, tc.raw, tc.parts...)
+				result.Lines[row-1].Number = row
+				if !inline {
+					parent := 9
+					result.Lines[row-1].ParentLine = &parent
+				}
+				v184TestRun(t, result, "current", nil)
+			})
+		}
+	}
+}
+
 func TestV184SeparatorsAndRanges(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -417,6 +552,45 @@ type v184TestItem struct {
 	inline    bool
 }
 
+// v184TestFragmentedAnswer задаёт A→1 и ответ B из явных фрагментов исходной строки.
+func v184TestFragmentedAnswer(t *testing.T, inline bool, raw string, parts ...model.Element) *model.Result {
+	t.Helper()
+	rows := []model.Line{v184TestText(t, "A", "A", 3, 2), v184TestTag(t, "answer", "content", "1", 3, 2), v184TestText(t, "B", "B", 3, 2)}
+	if inline {
+		rows = append(rows, v184TestFragmentLine(t, true, raw, parts...))
+	} else {
+		rows = append(rows, v184TestOpen(t, "answer", 3, 2), v184TestFragmentLine(t, false, raw, parts...), v184TestClose(t, 7, 3))
+	}
+	return v184TestOrdering(t, rows...)
+}
+
+// v184TestFragmentLine сохраняет фрагменты с координатами относительно значения.
+func v184TestFragmentLine(t *testing.T, inline bool, raw string, parts ...model.Element) model.Line {
+	t.Helper()
+	if !inline {
+		return v184TestLine(t, raw, "content", 7, 3, parts...)
+	}
+	elements := []model.Element{v184TestElement(t, "tag", "@answer", "answer", 1, 8)}
+	for _, part := range parts {
+		part.Start += 8
+		part.End += 8
+		elements = append(elements, part)
+	}
+	return v184TestLine(t, "@answer "+raw, "tag", 3, 2, elements...)
+}
+
+// v184TestDetail сравнивает полный текст и исходные диапазоны без анализа графа.
+func v184TestDetail(t *testing.T, got model.Diagnostic, detail string, related []model.Location) {
+	t.Helper()
+	message := "Указанные ответы не позволяют разместить все элементы по разным позициям.\nконкретизация: " + detail
+	if got.Message != message {
+		t.Errorf("message = %q, want %q", got.Message, message)
+	}
+	if !slices.Equal(got.RelatedLocations, related) {
+		t.Errorf("related = %+v, want %+v", got.RelatedLocations, related)
+	}
+}
+
 // v184TestItems строит согласованный блок с явными наборами допустимых позиций.
 func v184TestItems(t *testing.T, items ...v184TestItem) *model.Result {
 	t.Helper()
@@ -465,7 +639,7 @@ func v184TestInvalid(t *testing.T, raw string, parent, depth int) model.Line {
 }
 
 // v184TestRun запускает штатный конвейер и проверяет только V184 текущего запуска.
-func v184TestRun(t *testing.T, result *model.Result, source string, want []v184Expected) {
+func v184TestRun(t *testing.T, result *model.Result, source string, want []v184Expected) []model.Diagnostic {
 	t.Helper()
 	registry, err := diagnostics.NewRegistry(RegistrationCheckers())
 	if err != nil {
@@ -504,8 +678,8 @@ func v184TestRun(t *testing.T, result *model.Result, source string, want []v184E
 		message := fmt.Sprintf("Указанные ответы не позволяют разместить все элементы по разным позициям.\nконкретизация: Одновременно удаётся разместить %d из %d элементов.", expected.matched, expected.total)
 		primary := model.Location{Start: model.Position{Line: expected.line, Column: expected.start}, End: model.Position{Line: expected.endLine, Column: expected.end}}
 		if entry.ID == "" || entry.Fatal || entry.SeverityLevel != "error" || entry.DiagnosticScope != "block" ||
-			entry.Message != message ||
-			entry.Location == nil || *entry.Location != primary || len(entry.RelatedLocations) != 0 {
+			!strings.HasPrefix(entry.Message, message+" Дефицитная группа: элементы ") ||
+			entry.Location == nil || *entry.Location != primary {
 			t.Fatalf("occurrence %d = %+v, want %+v", index, entry, expected)
 		}
 		for _, line := range result.Lines {
@@ -549,6 +723,7 @@ func v184TestRun(t *testing.T, result *model.Result, source string, want []v184E
 			t.Fatal("diagnostic history changed")
 		}
 	}
+	return got
 }
 
 // v184TestError добавляет исходную ошибку: index=-1 для строки, иначе для элемента.

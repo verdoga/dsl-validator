@@ -59,7 +59,7 @@ func TestV183ReferenceAndExample(t *testing.T) {
 			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "Last", "Last", 3, 2)}, nil},
 		{"example", "@ordering {\nA\n@answer First\nB\n@answer Other\n---\nFirst\nfirst\nOther\n}", append(v183TestUpper(t),
 			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2), v183TestText(t, "Other", "Other", 3, 2)),
-			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
+			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := v183TestBlock(t, "ordering", tc.body...)
@@ -86,8 +86,8 @@ func TestV183Grouping(t *testing.T) {
 		{"unique", []string{"First", "Other", "Last"}, nil},
 		{"no positions", nil, nil},
 		{"one position", []string{"First"}, nil},
-		{"three occurrences", []string{"First", "first", "FIRST"}, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {11, 1, 6}}}}},
-		{"separated occurrences", []string{"First", "Other", "first"}, []v183Want{{[3]int{11, 1, 6}, [][3]int{{9, 1, 6}}}}},
+		{"three occurrences", []string{"First", "first", "FIRST"}, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {11, 1, 6}, {5, 9, 14}}}}},
+		{"separated occurrences", []string{"First", "Other", "first"}, []v183Want{{[3]int{11, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}}},
 		{"two groups", []string{"One", "one", "Two", "two", "ONE", "TWO"}, []v183Want{
 			{[3]int{10, 1, 4}, [][3]int{{9, 1, 4}, {13, 1, 4}}}, {[3]int{12, 1, 4}, [][3]int{{11, 1, 4}, {14, 1, 4}}}}},
 		{"punctuation only", []string{"?!", "?!"}, []v183Want{{[3]int{10, 1, 3}, [][3]int{{9, 1, 3}}}}},
@@ -115,12 +115,41 @@ func TestV183Grouping(t *testing.T) {
 	})
 }
 
+func TestV183RelatedAnswerRanges(t *testing.T) {
+	t.Run("positions precede matching inline and block alternatives in source order", func(t *testing.T) {
+		body := []model.Line{
+			v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "answer", "BEFORE!", 3, 2),
+			v183TestText(t, "B", "B", 3, 2), v183TestOpen(t, "answer", 3, 2),
+			v183TestText(t, "  Before\t", "Before", 7, 3), v183TestText(t, "After", "After", 7, 3),
+			v183TestText(t, "BEFORE!", "BEFORE!", 7, 3), v183TestClose(t, 7, 3),
+			v183TestText(t, "C", "C", 3, 2), v183TestInline(t, "answer", "before", 3, 2),
+			v183TestSeparator(t, "---", 3, 2),
+			v183TestText(t, "Before", "Before", 3, 2), v183TestText(t, "BEFORE!", "BEFORE!", 3, 2),
+			v183TestText(t, "before?", "before?", 3, 2),
+			v183TestText(t, "After", "After", 3, 2), v183TestText(t, "after!", "after!", 3, 2),
+		}
+		v183TestRun(t, v183TestBlock(t, "ordering", body...), []v183Want{
+			{[3]int{16, 1, 8}, [][3]int{{15, 1, 7}, {17, 1, 8}, {5, 9, 16}, {8, 3, 9}, {10, 1, 8}, {13, 9, 15}}},
+			{[3]int{19, 1, 7}, [][3]int{{18, 1, 6}, {9, 1, 6}}},
+		})
+	})
+	t.Run("inline and block references may share one normalized position", func(t *testing.T) {
+		body := []model.Line{
+			v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "answer", "Before", 3, 2),
+			v183TestText(t, "B", "B", 3, 2), v183TestOpen(t, "answer", 3, 2),
+			v183TestText(t, "BEFORE!", "BEFORE!", 7, 3), v183TestClose(t, 7, 3),
+			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "Before", "Before", 3, 2),
+		}
+		v183TestRun(t, v183TestBlock(t, "ordering", body...), nil)
+	})
+}
+
 func TestV183ComparisonAndEscapes(t *testing.T) {
 	for _, tc := range []struct {
 		name, firstRaw, firstValue, secondRaw, secondValue string
 		want                                               []v183Want
 	}{
-		{"case", "First", "First", "FIRST", "FIRST", []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
+		{"case", "First", "First", "FIRST", "FIRST", []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}}},
 		{"case and punctuation", "Before", "Before", "BEFORE!", "BEFORE!", []v183Want{{[3]int{10, 1, 8}, [][3]int{{9, 1, 7}}}}},
 		{"Unicode lower case does not fold long s", "ſ", "ſ", "S", "S", nil},
 		{"unicode columns", "Ёж🌍", "Ёж🌍", "ёж🌍", "ёж🌍", []v183Want{{[3]int{10, 1, 4}, [][3]int{{9, 1, 4}}}}},
@@ -128,18 +157,18 @@ func TestV183ComparisonAndEscapes(t *testing.T) {
 		{"internal tabs", "A B", "A B", "A\tB", "A\tB", []v183Want{{[3]int{10, 1, 4}, [][3]int{{9, 1, 4}}}}},
 		{"different Unicode spaces", "New\u00a0York", "New\u00a0York", "New\u2003\u2009York", "New\u2003\u2009York", []v183Want{{[3]int{10, 1, 10}, [][3]int{{9, 1, 9}}}}},
 		{"same internal tabs", "A\tB", "A\tB", "a\tb", "a\tb", []v183Want{{[3]int{10, 1, 4}, [][3]int{{9, 1, 4}}}}},
-		{"punctuation", "First", "First", "First!", "First!", []v183Want{{[3]int{10, 1, 7}, [][3]int{{9, 1, 6}}}}},
+		{"punctuation", "First", "First", "First!", "First!", []v183Want{{[3]int{10, 1, 7}, [][3]int{{9, 1, 6}, {5, 9, 14}}}}},
 		{"numbers", "First", "First", "1. First", "1. First", nil},
-		{"quote style", `"First"`, `"First"`, "«First»", "«First»", []v183Want{{[3]int{10, 1, 8}, [][3]int{{9, 1, 8}}}}},
-		{"non ASCII edge space", "First", "First", "First\u00a0", "First\u00a0", []v183Want{{[3]int{10, 1, 7}, [][3]int{{9, 1, 6}}}}},
-		{"Unicode edge spaces retain source ranges", "\u00a0First\u2003", "\u00a0First\u2003", "\t first! \t", "first!", []v183Want{{[3]int{10, 3, 9}, [][3]int{{9, 1, 8}}}}},
+		{"quote style", `"First"`, `"First"`, "«First»", "«First»", []v183Want{{[3]int{10, 1, 8}, [][3]int{{9, 1, 8}, {5, 9, 14}}}}},
+		{"non ASCII edge space", "First", "First", "First\u00a0", "First\u00a0", []v183Want{{[3]int{10, 1, 7}, [][3]int{{9, 1, 6}, {5, 9, 14}}}}},
+		{"Unicode edge spaces retain source ranges", "\u00a0First\u2003", "\u00a0First\u2003", "\t first! \t", "first!", []v183Want{{[3]int{10, 3, 9}, [][3]int{{9, 1, 8}, {5, 9, 14}}}}},
 		{"NBSP alone has empty primary", "\u00a0", "\u00a0", "\u00a0", "\u00a0", nil},
 		{"unicode normalization forbidden", "é", "é", "e\u0301", "e\u0301", nil},
-		{"ASCII edges", " \tFirst\t ", "First", "\t first \t", "first", []v183Want{{[3]int{10, 3, 8}, [][3]int{{9, 3, 8}}}}},
+		{"ASCII edges", " \tFirst\t ", "First", "\t first \t", "first", []v183Want{{[3]int{10, 3, 8}, [][3]int{{9, 3, 8}, {5, 9, 14}}}}},
 		{"opening brace", `A\{B`, "A{B", `a\{b`, "a{b", []v183Want{{[3]int{10, 1, 5}, [][3]int{{9, 1, 5}}}}},
 		{"closing brace", `A\}B`, "A}B", `a\}b`, "a}b", []v183Want{{[3]int{10, 1, 5}, [][3]int{{9, 1, 5}}}}},
-		{"initial at sign", `\@First`, "@First", `\@first`, "@first", []v183Want{{[3]int{10, 1, 8}, [][3]int{{9, 1, 8}}}}},
-		{"initial hash", `\#First`, "#First", `\#first`, "#first", []v183Want{{[3]int{10, 1, 8}, [][3]int{{9, 1, 8}}}}},
+		{"initial at sign", `\@First`, "@First", `\@first`, "@first", []v183Want{{[3]int{10, 1, 8}, [][3]int{{9, 1, 8}, {5, 9, 14}}}}},
+		{"initial hash", `\#First`, "#First", `\#first`, "#first", []v183Want{{[3]int{10, 1, 8}, [][3]int{{9, 1, 8}, {5, 9, 14}}}}},
 		{"escaped separator", `\---`, "---", `\---`, "---", []v183Want{{[3]int{10, 1, 5}, [][3]int{{9, 1, 5}}}}},
 		{"backslash removed as punctuation", `a\\b`, `a\b`, "ab", "ab", []v183Want{{[3]int{10, 1, 3}, [][3]int{{9, 1, 5}}}}},
 		{"paired backslashes", `a\\b`, `a\b`, `A\\B`, `A\B`, []v183Want{{[3]int{10, 1, 5}, [][3]int{{9, 1, 5}}}}},
@@ -165,7 +194,7 @@ func TestV183ComparisonAndEscapes(t *testing.T) {
 func TestV183ValueRepresentations(t *testing.T) {
 	t.Run("several content fragments form one position", func(t *testing.T) {
 		first := v183TestLine(t, "First", "content", 3, 2, v183TestElement(t, "content", "Fi", "Fi", 1), v183TestElement(t, "content", "rst", "rst", 3))
-		v183TestRun(t, v183TestExpanded(t, first, v183TestText(t, "first", "first", 3, 2)), []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}})
+		v183TestRun(t, v183TestExpanded(t, first, v183TestText(t, "first", "first", 3, 2)), []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}})
 	})
 	t.Run("fragment gaps retain whitespace", func(t *testing.T) {
 		first := v183TestLine(t, "New \tYork", "content", 3, 2, v183TestElement(t, "content", "New", "New", 1), v183TestElement(t, "content", "York", "York", 6))
@@ -174,7 +203,7 @@ func TestV183ValueRepresentations(t *testing.T) {
 	t.Run("content excludes source indentation", func(t *testing.T) {
 		first := v183TestLine(t, "  First\t", "content", 3, 2, v183TestElement(t, "content", "First", "First", 3))
 		second := v183TestLine(t, "\t first ", "content", 3, 2, v183TestElement(t, "content", "first", "first", 3))
-		v183TestRun(t, v183TestExpanded(t, first, second), []v183Want{{[3]int{10, 3, 8}, [][3]int{{9, 3, 8}}}})
+		v183TestRun(t, v183TestExpanded(t, first, second), []v183Want{{[3]int{10, 3, 8}, [][3]int{{9, 3, 8}, {5, 9, 14}}}})
 	})
 	t.Run("ASCII blank rows are not positions", func(t *testing.T) {
 		v183TestRun(t, v183TestExpanded(t, v183TestText(t, "First", "First", 3, 2), v183TestLine(t, " \t", "blank", 3, 2), v183TestLine(t, "", "blank", 3, 2), v183TestText(t, "Other", "Other", 3, 2)), nil)
@@ -220,7 +249,7 @@ func TestV183ZeroWidthContent(t *testing.T) {
 	t.Run("empty marker in upper item retains associated answer", func(t *testing.T) {
 		result := v183TestExpanded(t, v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2))
 		result.Lines[3].Elements = append(result.Lines[3].Elements, v183TestElement(t, "content", "", "", 2))
-		v183TestRun(t, result, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}})
+		v183TestRun(t, result, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}})
 	})
 }
 
@@ -236,11 +265,11 @@ func TestV183AnswerAssociation(t *testing.T) {
 		{"partial last answered", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}, nil},
 		{"orphan answer", append([]model.Line{v183TestInline(t, "answer", "First", 3, 2)}, v183TestUpper(t)...), nil},
 		{"repeated answer", append(v183TestUpper(t), v183TestInline(t, "answer", "Other", 3, 2)), nil},
-		{"one upper item is enough for this check", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "answer", "First", 3, 2)}, []v183Want{{[3]int{8, 1, 6}, [][3]int{{7, 1, 6}}}}},
-		{"duplicate upper items stay separate", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "answer", "First", 3, 2), v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
-		{"blank before answer", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestLine(t, " \t", "blank", 3, 2), v183TestInline(t, "answer", "First", 3, 2), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}, []v183Want{{[3]int{11, 1, 6}, [][3]int{{10, 1, 6}}}}},
-		{"hint after answer", append(v183TestUpper(t), v183TestInline(t, "hint", "Explanation", 3, 2)), []v183Want{{[3]int{11, 1, 6}, [][3]int{{10, 1, 6}}}}},
-		{"block answer", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestOpen(t, "answer", 3, 2), v183TestText(t, "First", "First", 5, 3), v183TestText(t, "Other", "Other", 5, 3), v183TestClose(t, 5, 3), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}, []v183Want{{[3]int{13, 1, 6}, [][3]int{{12, 1, 6}}}}},
+		{"one upper item is enough for this check", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "answer", "First", 3, 2)}, []v183Want{{[3]int{8, 1, 6}, [][3]int{{7, 1, 6}, {5, 9, 14}}}}},
+		{"duplicate upper items stay separate", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "answer", "First", 3, 2), v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}}},
+		{"blank before answer", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestLine(t, " \t", "blank", 3, 2), v183TestInline(t, "answer", "First", 3, 2), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}, []v183Want{{[3]int{11, 1, 6}, [][3]int{{10, 1, 6}, {6, 9, 14}}}}},
+		{"hint after answer", append(v183TestUpper(t), v183TestInline(t, "hint", "Explanation", 3, 2)), []v183Want{{[3]int{11, 1, 6}, [][3]int{{10, 1, 6}, {5, 9, 14}}}}},
+		{"block answer", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestOpen(t, "answer", 3, 2), v183TestText(t, "First", "First", 5, 3), v183TestText(t, "Other", "Other", 5, 3), v183TestClose(t, 5, 3), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}, []v183Want{{[3]int{13, 1, 6}, [][3]int{{12, 1, 6}, {6, 1, 6}}}}},
 		{"empty block answer", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestOpen(t, "answer", 3, 2), v183TestClose(t, 5, 3), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}, nil},
 		{"unknown answer contents", []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestOpen(t, "answer", 3, 2), v183TestUnparsed(t, "x {", "invalid", 5, 3), v183TestClose(t, 5, 3), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}, nil},
 		{"unknown upper item", []model.Line{v183TestUnparsed(t, "A {", "invalid", 3, 2), v183TestInline(t, "answer", "First", 3, 2), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)}, nil},
@@ -258,10 +287,18 @@ func TestV183AnswerAssociation(t *testing.T) {
 			v183TestRun(t, v183TestBlock(t, "ordering", body...), nil)
 		})
 	}
-	for _, value := range []string{"wrong!", "0", "First", "?!"} {
-		t.Run("known nonempty answer/"+value, func(t *testing.T) {
-			body := []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "AnSwEr", value, 3, 2), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "ANSWER", value, 3, 2), v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2)}
-			v183TestRun(t, v183TestBlock(t, "ORDERING", body...), []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}})
+	for _, tc := range []struct {
+		value   string
+		related [][3]int
+	}{
+		{"wrong!", [][3]int{{9, 1, 6}}},
+		{"0", [][3]int{{9, 1, 6}}},
+		{"First", [][3]int{{9, 1, 6}, {5, 9, 14}, {7, 9, 14}}},
+		{"?!", [][3]int{{9, 1, 6}}},
+	} {
+		t.Run("known nonempty answer/"+tc.value, func(t *testing.T) {
+			body := []model.Line{v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "AnSwEr", tc.value, 3, 2), v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "ANSWER", tc.value, 3, 2), v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2)}
+			v183TestRun(t, v183TestBlock(t, "ORDERING", body...), []v183Want{{[3]int{10, 1, 6}, tc.related}})
 		})
 	}
 	for _, value := range []string{"", " \t", "\u00a0\u2003"} {
@@ -298,7 +335,7 @@ func TestV183EveryAnswerAlternativeMustBeKnownAndNonempty(t *testing.T) {
 				v183TestText(t, "first", "first", 3, 2), v183TestText(t, "Other", "Other", 3, 2)}
 			var want []v183Want
 			if tc.duplicate {
-				want = []v183Want{{[3]int{13, 1, 6}, [][3]int{{12, 1, 6}}}}
+				want = []v183Want{{[3]int{13, 1, 6}, [][3]int{{12, 1, 6}, {6, 1, 6}}}}
 			}
 			v183TestRun(t, v183TestBlock(t, "ordering", body...), want)
 		})
@@ -312,17 +349,17 @@ func TestV183WhitespaceRawContentRetainsSemanticValue(t *testing.T) {
 			v183TestText(t, "B", "B", 3, 2), v183TestInline(t, "answer", "Other", 3, 2),
 			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2),
 			v183TestText(t, "first", "first", 3, 2), v183TestText(t, "Other", "Other", 3, 2)}
-		v183TestRun(t, v183TestBlock(t, "ordering", body...), []v183Want{{[3]int{12, 1, 6}, [][3]int{{11, 1, 6}}}})
+		v183TestRun(t, v183TestBlock(t, "ordering", body...), []v183Want{{[3]int{12, 1, 6}, [][3]int{{11, 1, 6}, {6, 3, 3}}}})
 	})
 	t.Run("upper item", func(t *testing.T) {
 		result := v183TestExpanded(t, v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2))
 		result.Lines[3] = v183TestText(t, " \t", "A", 3, 2)
 		result.Lines[3].Number = 4
-		v183TestRun(t, result, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}})
+		v183TestRun(t, result, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}})
 	})
 	t.Run("lower position", func(t *testing.T) {
 		v183TestRun(t, v183TestExpanded(t, v183TestText(t, " \t", "First", 3, 2), v183TestText(t, "first", "first", 3, 2)),
-			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 3, 3}}}})
+			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 3, 3}, {5, 9, 14}}}})
 	})
 }
 
@@ -334,7 +371,7 @@ func TestV183SeparatorsAndNestedBodies(t *testing.T) {
 	}{
 		{"no separator", nil, nil},
 		{"two separators", []model.Line{v183TestSeparator(t, "---", 3, 2), v183TestSeparator(t, "---", 3, 2)}, nil},
-		{"trim only ASCII edges", []model.Line{v183TestSeparator(t, " \t---\t ", 3, 2)}, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
+		{"trim only ASCII edges", []model.Line{v183TestSeparator(t, " \t---\t ", 3, 2)}, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}}},
 		{"escaped separator is ordinary text", []model.Line{v183TestText(t, `\---`, "---", 3, 2)}, nil},
 		{"NBSP is not trimmed", []model.Line{v183TestText(t, "\u00a0---", "\u00a0---", 3, 2)}, nil},
 	} {
@@ -353,7 +390,7 @@ func TestV183SeparatorsAndNestedBodies(t *testing.T) {
 	t.Run("nested hint separator does not disable duplicate check", func(t *testing.T) {
 		body := append(v183TestUpper(t), v183TestOpen(t, "hint", 3, 2), v183TestText(t, "---", "---", 8, 3), v183TestText(t, "First", "First", 8, 3), v183TestClose(t, 8, 3),
 			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2))
-		v183TestRun(t, v183TestBlock(t, "ordering", body...), []v183Want{{[3]int{14, 1, 6}, [][3]int{{13, 1, 6}}}})
+		v183TestRun(t, v183TestBlock(t, "ordering", body...), []v183Want{{[3]int{14, 1, 6}, [][3]int{{13, 1, 6}, {5, 9, 14}}}})
 	})
 	t.Run("nested lower bodies are not positions", func(t *testing.T) {
 		body := append(v183TestUpper(t), v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2),
@@ -361,7 +398,7 @@ func TestV183SeparatorsAndNestedBodies(t *testing.T) {
 		v183TestRun(t, v183TestBlock(t, "ordering", body...), nil)
 	})
 	t.Run("known lower tag does not hide direct duplicates", func(t *testing.T) {
-		v183TestRun(t, v183TestExpanded(t, v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)), []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}})
+		v183TestRun(t, v183TestExpanded(t, v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2), v183TestInline(t, "answer", "Other", 3, 2)), []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}})
 	})
 	t.Run("heading excluded from lower positions", func(t *testing.T) {
 		heading := v183TestLine(t, "### First", "invalid", 3, 2, v183TestElement(t, "heading-level", "###", "3", 1), model.Element{ElementType: "unparsed", Raw: "First", Start: 5, End: 10, ErrorIDs: []string{}})
@@ -389,7 +426,7 @@ func TestV183ContextsAndLifecycle(t *testing.T) {
 			var want []v183Want
 			if duplicate {
 				last = "first"
-				want = []v183Want{{[3]int{8, 1, 6}, [][3]int{{7, 1, 6}}}, {[3]int{15, 1, 6}, [][3]int{{14, 1, 6}}}}
+				want = []v183Want{{[3]int{8, 1, 6}, [][3]int{{7, 1, 6}, {5, 9, 14}}}, {[3]int{15, 1, 6}, [][3]int{{14, 1, 6}}}}
 			}
 			v183TestRun(t, v183TestDocument(t,
 				v183TestOpen(t, "ordering", 2, 1), v183TestText(t, "A", "A", 3, 2), v183TestInline(t, "answer", "First", 3, 2), v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, last, last, 3, 2), v183TestClose(t, 3, 2),
@@ -400,7 +437,7 @@ func TestV183ContextsAndLifecycle(t *testing.T) {
 		first := v183TestLine(t, "@variant A", "tag", 3, 2, v183TestElement(t, "tag", "@variant", "variant", 1), v183TestElement(t, "name", "A", "A", 10))
 		second := v183TestLine(t, "@variant B", "tag", 3, 2, v183TestElement(t, "tag", "@variant", "variant", 1), v183TestElement(t, "name", "B", "B", 10))
 		v183TestRun(t, v183TestDocument(t, v183TestOpen(t, "variants", 2, 1), first, v183TestOpen(t, "ordering", 4, 3),
-			v183TestText(t, "A", "A", 5, 4), v183TestInline(t, "answer", "First", 5, 4), v183TestText(t, "B", "B", 5, 4), v183TestInline(t, "answer", "Other", 5, 4), v183TestSeparator(t, "---", 5, 4), v183TestText(t, "First", "First", 5, 4), v183TestText(t, "first", "first", 5, 4), v183TestText(t, "Other", "Other", 5, 4), v183TestClose(t, 5, 4), second, v183TestText(t, "Read.", "Read.", 15, 3), v183TestClose(t, 3, 2)), []v183Want{{[3]int{12, 1, 6}, [][3]int{{11, 1, 6}}}})
+			v183TestText(t, "A", "A", 5, 4), v183TestInline(t, "answer", "First", 5, 4), v183TestText(t, "B", "B", 5, 4), v183TestInline(t, "answer", "Other", 5, 4), v183TestSeparator(t, "---", 5, 4), v183TestText(t, "First", "First", 5, 4), v183TestText(t, "first", "first", 5, 4), v183TestText(t, "Other", "Other", 5, 4), v183TestClose(t, 5, 4), second, v183TestText(t, "Read.", "Read.", 15, 3), v183TestClose(t, 3, 2)), []v183Want{{[3]int{12, 1, 6}, [][3]int{{11, 1, 6}, {7, 9, 14}}}})
 	})
 	for _, name := range []string{"matching", "choice", "multichoice"} {
 		t.Run("other container/"+name, func(t *testing.T) {
@@ -428,7 +465,7 @@ func TestV183ContextsAndLifecycle(t *testing.T) {
 				if !final {
 					result.Lines[len(result.Lines)-1].LineEnding = ""
 				}
-				v183TestRun(t, result, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}})
+				v183TestRun(t, result, []v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}})
 			})
 		}
 	}
@@ -442,7 +479,7 @@ func TestV183StructuralBoundaries(t *testing.T) {
 	}{
 		{"unclosed block retains determinable positions", append(v183TestUpper(t),
 			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2)),
-			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
+			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}}},
 		{"membership returns after unrelated line", append(v183TestUpper(t),
 			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "outside", "outside", 2, 1), v183TestText(t, "first", "first", 3, 2), v183TestClose(t, 3, 2)), nil},
 		{"membership returns after closing", append(v183TestUpper(t),
@@ -462,11 +499,11 @@ func TestV183StructuralBoundaries(t *testing.T) {
 		{"closed nested block followed by direct position", append(v183TestUpper(t),
 			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2),
 			v183TestOpen(t, "hint", 3, 2), v183TestText(t, "ignored", "ignored", 10, 3), v183TestClose(t, 10, 3), v183TestText(t, "first", "first", 3, 2), v183TestClose(t, 3, 2)),
-			[]v183Want{{[3]int{13, 1, 6}, [][3]int{{9, 1, 6}}}}},
+			[]v183Want{{[3]int{13, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}}},
 		{"unrelated malformed block does not invalidate ordering", append(v183TestUpper(t),
 			v183TestSeparator(t, "---", 3, 2), v183TestText(t, "First", "First", 3, 2), v183TestText(t, "first", "first", 3, 2), v183TestClose(t, 3, 2),
 			v183TestOpen(t, "hint", 2, 1), v183TestClose(t, 12, 2), v183TestText(t, "late", "late", 12, 2)),
-			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}}}}},
+			[]v183Want{{[3]int{10, 1, 6}, [][3]int{{9, 1, 6}, {5, 9, 14}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := append([]model.Line{v183TestOpen(t, "ordering", 2, 1)}, tc.body...)
@@ -529,7 +566,7 @@ func v183TestManyBlocks(t testing.TB, count int) (*model.Result, []v183Want) {
 			v183TestText(t, "A", "A", number, 2), v183TestInline(t, "answer", "First", number, 2),
 			v183TestText(t, "B", "B", number, 2), v183TestInline(t, "answer", "First", number, 2),
 			v183TestSeparator(t, "---", number, 2), v183TestText(t, "First", "First", number, 2), v183TestText(t, "first", "first", number, 2), v183TestClose(t, number, 2))
-		want = append(want, v183Want{[3]int{number + 7, 1, 6}, [][3]int{{number + 6, 1, 6}}})
+		want = append(want, v183Want{[3]int{number + 7, 1, 6}, [][3]int{{number + 6, 1, 6}, {number + 2, 9, 14}, {number + 4, 9, 14}}})
 	}
 	return v183TestDocument(t, body...), want
 }

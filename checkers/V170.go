@@ -167,7 +167,7 @@ func v170Labels(lower []diagnostics.Line) ([]v170Value, bool) {
 }
 
 // v170Text соединяет готовые content без повторного снятия экранирования.
-// Между фрагментами сохраняются только однозначные ASCII-пробелы и табуляция.
+// Между фрагментами сохраняются однозначные пробельные символы Unicode.
 // При отсутствии content восстановление допустимо лишь для целой известной
 // текстовой области без дополнительных элементов и неразобранных частей.
 func v170Text(line diagnostics.Line, inline, separator bool) (v170Value, bool) {
@@ -210,7 +210,7 @@ func v170Text(line diagnostics.Line, inline, separator bool) (v170Value, bool) {
 		for _, content := range contents {
 			if gapEnd := min(content.Start()-1, end); gapEnd > cursor {
 				gap := string(raw[cursor:gapEnd])
-				if strings.Trim(gap, " \t") != "" {
+				if strings.TrimSpace(gap) != "" {
 					return v170Value{}, false
 				}
 				text.WriteString(gap)

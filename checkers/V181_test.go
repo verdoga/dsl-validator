@@ -174,6 +174,13 @@ func TestV181BlockAnswers(t *testing.T) {
 	t.Run("separate normalized answers", func(t *testing.T) {
 		v181TestRun(t, v181TestBase(t, "3.", "(3)"), "current", []v181Expected{{5, 9, 11, "2", nil}, {7, 9, 12, "2", nil}})
 	})
+	t.Run("separate whitespace normalized answers", func(t *testing.T) {
+		result := v181TestOrdering(t, v181TestText(t, "A", "A", 3, 2),
+			v181TestLine(t, "@answer ( 3)", "tag", 3, 2, v181TestElement(t, "tag", "@answer", "answer", 1, 8), v181TestElement(t, "content", "( 3)", "( 3)", 9, 13)),
+			v181TestText(t, "B", "B", 3, 2),
+			v181TestLine(t, " \t@answer (\u20033) ", "tag", 3, 2, v181TestElement(t, "tag", "@answer", "answer", 3, 10), v181TestElement(t, "content", "(", "(", 11, 12), v181TestElement(t, "content", "3)", "3)", 13, 15)))
+		v181TestRun(t, result, "current", []v181Expected{{5, 9, 13, "2", nil}, {7, 11, 15, "2", nil}})
+	})
 	t.Run("deeper value excluded", func(t *testing.T) {
 		result := v181TestOrdering(t, v181TestText(t, "A", "A", 3, 2), v181TestOpen(t, "answer", 3, 2), v181TestOpen(t, "note", 5, 3), v181TestText(t, "3", "3", 6, 4),
 			v181TestClose(t, 6, 4), v181TestClose(t, 5, 3), v181TestText(t, "B", "B", 3, 2), v181TestTag(t, "answer", "content", "2", 3, 2))
@@ -269,19 +276,77 @@ func TestV181Contexts(t *testing.T) {
 }
 
 func TestV181WholeValues(t *testing.T) {
+	unparsed := v181TestElement(t, "unparsed", " ", "", 2, 3)
+	unparsed.Value = nil
 	for _, tc := range []struct {
-		raw   string
-		parts []model.Element
-		want  []v181Expected
+		name, raw string
+		parts     []model.Element
+		end       int
 	}{
-		{"@answer 30", []model.Element{v181TestElement(t, "tag", "@answer", "answer", 1, 8), v181TestElement(t, "content", "3", "3", 9, 10), v181TestElement(t, "content", "0", "0", 10, 11)}, []v181Expected{{5, 9, 11, "2", nil}}},
-		{"@answer 3 0", []model.Element{v181TestElement(t, "tag", "@answer", "answer", 1, 8), v181TestElement(t, "content", "3", "3", 9, 10), v181TestElement(t, "content", "0", "0", 11, 12)}, nil},
+		{"single content", "( 3)", []model.Element{v181TestElement(t, "content", "( 3)", "( 3)", 1, 5)}, 5},
+		{"split space", "( 3)", []model.Element{v181TestElement(t, "content", "(", "(", 1, 2), v181TestElement(t, "content", "3)", "3)", 3, 5)}, 5},
+		{"split tab", "(\t3)", []model.Element{v181TestElement(t, "content", "(", "(", 1, 2), v181TestElement(t, "content", "3)", "3)", 3, 5)}, 5},
+		{"split NBSP", "(\u00a03)", []model.Element{v181TestElement(t, "content", "(", "(", 1, 2), v181TestElement(t, "content", "3)", "3)", 3, 5)}, 5},
+		{"split EM SPACE", "(\u20033)", []model.Element{v181TestElement(t, "content", "(", "(", 1, 2), v181TestElement(t, "content", "3)", "3)", 3, 5)}, 5},
+		{"adjacent digits", "30", []model.Element{v181TestElement(t, "content", "3", "3", 1, 2), v181TestElement(t, "content", "0", "0", 2, 3)}, 3},
+		{"single separated digits", "3 0", []model.Element{v181TestElement(t, "content", "3 0", "3 0", 1, 4)}, 0},
+		{"split separated digits", "3 0", []model.Element{v181TestElement(t, "content", "3", "3", 1, 2), v181TestElement(t, "content", "0", "0", 3, 4)}, 0},
+		{"unknown prefix", "?3", []model.Element{v181TestElement(t, "content", "3", "3", 2, 3)}, 0},
+		{"unknown gap", "(?3)", []model.Element{v181TestElement(t, "content", "(", "(", 1, 2), v181TestElement(t, "content", "3)", "3)", 3, 5)}, 0},
+		{"unknown suffix", "3?", []model.Element{v181TestElement(t, "content", "3", "3", 1, 2)}, 0},
+		{"unparsed whitespace gap", "( 3)", []model.Element{v181TestElement(t, "content", "(", "(", 1, 2), unparsed, v181TestElement(t, "content", "3)", "3)", 3, 5)}, 0},
+		{"empty marker inside content", "30", []model.Element{v181TestElement(t, "content", "30", "30", 1, 3), v181TestElement(t, "content", "", "", 2, 2)}, 3},
+		{"empty marker in gap", "( 3)", []model.Element{v181TestElement(t, "content", "(", "(", 1, 2), v181TestElement(t, "content", "", "", 2, 2), v181TestElement(t, "content", "3)", "3)", 3, 5)}, 5},
 	} {
-		t.Run(tc.raw, func(t *testing.T) {
-			result := v181TestOrdering(t, v181TestText(t, "A", "A", 3, 2), v181TestLine(t, tc.raw, "tag", 3, 2, tc.parts...), v181TestText(t, "B", "B", 3, 2), v181TestTag(t, "answer", "content", "2", 3, 2))
-			v181TestRun(t, result, "current", tc.want)
+		t.Run(tc.name, func(t *testing.T) {
+			for _, block := range []bool{false, true} {
+				t.Run("block="+strconv.FormatBool(block), func(t *testing.T) {
+					prefix, kind, parent, depth, number := " \t@answer ", model.LineTypeTag, 3, 2, 5
+					rows := []model.Line{v181TestText(t, "A", "A", 3, 2)}
+					var parts []model.Element
+					if block {
+						prefix, kind, parent, depth, number = " \t", model.LineTypeContent, 5, 3, 6
+						rows = append(rows, v181TestOpen(t, "answer", 3, 2))
+					} else {
+						parts = append(parts, v181TestElement(t, "tag", "@answer", "answer", 3, 10))
+					}
+					offset := utf8.RuneCountInString(prefix)
+					for _, element := range tc.parts {
+						element.Start += offset
+						element.End += offset
+						parts = append(parts, element)
+					}
+					rows = append(rows, v181TestLine(t, prefix+tc.raw+" \t", kind, parent, depth, parts...))
+					if block {
+						rows = append(rows, v181TestClose(t, 5, 3))
+					}
+					rows = append(rows, v181TestText(t, "B", "B", 3, 2), v181TestTag(t, "answer", "content", "2", 3, 2))
+					var want []v181Expected
+					if tc.end != 0 {
+						want = []v181Expected{{number, offset + 1, offset + tc.end, "2", nil}}
+					}
+					v181TestRun(t, v181TestOrdering(t, rows...), "current", want)
+				})
+			}
 		})
 	}
+}
+
+func TestV181WhitespaceNormalizedGroups(t *testing.T) {
+	result := v181TestOrdering(t,
+		v181TestText(t, "A", "A", 3, 2), v181TestOpen(t, "answer", 3, 2),
+		v181TestLine(t, " \t( 3) \t", "content", 5, 3, v181TestElement(t, "content", "( 3)", "( 3)", 3, 7)),
+		v181TestLine(t, "(\t3)", "content", 5, 3, v181TestElement(t, "content", "(", "(", 1, 2), v181TestElement(t, "content", "3)", "3)", 3, 5)),
+		v181TestLine(t, "(\u00a03)", "content", 5, 3, v181TestElement(t, "content", "(", "(", 1, 2), v181TestElement(t, "content", "3)", "3)", 3, 5)),
+		v181TestLine(t, " (\u20033) ", "content", 5, 3, v181TestElement(t, "content", "(", "(", 2, 3), v181TestElement(t, "content", "3)", "3)", 4, 6)),
+		v181TestText(t, "3.", "3.", 5, 3), v181TestText(t, "-3", "-3", 5, 3),
+		v181TestText(t, "4", "4", 5, 3),
+		v181TestLine(t, "( 4)", "content", 5, 3, v181TestElement(t, "content", "(", "(", 1, 2), v181TestElement(t, "content", "4)", "4)", 3, 5)),
+		v181TestClose(t, 5, 3), v181TestText(t, "B", "B", 3, 2), v181TestTag(t, "answer", "content", "2", 3, 2))
+	v181TestRun(t, result, "current", []v181Expected{
+		{6, 3, 7, "2", [][3]int{{7, 1, 5}, {8, 1, 5}, {9, 2, 6}, {10, 1, 3}, {11, 1, 3}}},
+		{12, 1, 2, "2", [][3]int{{13, 1, 5}}},
+	})
 }
 
 func TestV181RegistrationAndHistory(t *testing.T) {
