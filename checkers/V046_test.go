@@ -717,6 +717,14 @@ func v046Run(t *testing.T, result *model.Result, processingID string, want []v04
 		}
 		for j, element := range line.Elements {
 			expectedLinks := append([]string{}, original.Lines[i].Elements[j].ErrorIDs...)
+			for _, entry := range result.Diagnostics[diagnosticCount:] {
+				location := entry.Location
+				if entry.DiagnosticScope == "element" && entry.DiagnosticCode != "V046" && location != nil &&
+					location.Start.Line == line.Number && location.End.Line == line.Number &&
+					location.Start.Column == element.Start && location.End.Column == element.End {
+					expectedLinks = append(expectedLinks, entry.ID)
+				}
+			}
 			if element.ErrorIDs == nil || !slices.Equal(element.ErrorIDs, expectedLinks) {
 				t.Errorf("line %d element %d links = %v, want %v", i+1, j, element.ErrorIDs, expectedLinks)
 			}
@@ -736,6 +744,21 @@ func v046Run(t *testing.T, result *model.Result, processingID string, want []v04
 	previous.Document.HasErrors = original.Document.HasErrors
 	for i := range previous.Lines {
 		previous.Lines[i].HasErrors = original.Lines[i].HasErrors
+	}
+	// В снимке исключаются новые ссылки других элементных диагностик каталога.
+	newElementIDs := make(map[string]bool)
+	for _, entry := range result.Diagnostics[len(previous.Diagnostics):] {
+		if entry.DiagnosticScope == "element" && entry.DiagnosticCode != "V046" {
+			newElementIDs[entry.ID] = true
+		}
+	}
+	previous.Lines = append([]model.Line{}, previous.Lines...)
+	for i := range previous.Lines {
+		previous.Lines[i].Elements = append([]model.Element{}, previous.Lines[i].Elements...)
+		for j := range previous.Lines[i].Elements {
+			element := &previous.Lines[i].Elements[j]
+			element.ErrorIDs = slices.DeleteFunc(slices.Clone(element.ErrorIDs), func(id string) bool { return newElementIDs[id] })
+		}
 	}
 	if v046Snapshot(t, &previous) != before {
 		t.Fatal("source model or previous history changed")

@@ -504,8 +504,11 @@ func TestV163HistoryAndEndings(t *testing.T) {
 
 func TestV163PhysicalHeadingContinuation(t *testing.T) {
 	definitions, err := v163TestRegistry(t).ForVersion("1.2")
-	if err != nil || len(definitions) != 198 {
-		t.Fatalf("full catalog: definitions=%d, err=%v", len(definitions), err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(definitions, func(d diagnostics.Definition) bool { return d.Code == "V163" }) {
+		t.Fatal("V163 is missing from the full catalog")
 	}
 	for _, heading := range []bool{false, true} {
 		t.Run("root heading="+strconv.FormatBool(heading), func(t *testing.T) {

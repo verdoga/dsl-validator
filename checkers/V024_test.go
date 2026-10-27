@@ -2,6 +2,7 @@ package checkers
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"unicode/utf8"
 
@@ -445,6 +446,21 @@ func v024Run(t *testing.T, result *model.Result, processingID string, want []v02
 	}
 	previous.Processing = result.Processing[:processingCount]
 	previous.Diagnostics = result.Diagnostics[:diagnosticCount]
+	// В снимке исключаются новые ссылки других элементных диагностик каталога.
+	newElementIDs := make(map[string]bool)
+	for _, entry := range result.Diagnostics[len(previous.Diagnostics):] {
+		if entry.DiagnosticScope == "element" && entry.DiagnosticCode != "V024" {
+			newElementIDs[entry.ID] = true
+		}
+	}
+	previous.Lines = append([]model.Line{}, previous.Lines...)
+	for i := range previous.Lines {
+		previous.Lines[i].Elements = append([]model.Element{}, previous.Lines[i].Elements...)
+		for j := range previous.Lines[i].Elements {
+			element := &previous.Lines[i].Elements[j]
+			element.ErrorIDs = slices.DeleteFunc(slices.Clone(element.ErrorIDs), func(id string) bool { return newElementIDs[id] })
+		}
+	}
 	if v024Snapshot(t, &previous) != before {
 		t.Fatal("document, lines, error flags, element links or previous history changed")
 	}

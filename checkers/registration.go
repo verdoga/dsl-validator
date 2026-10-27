@@ -213,5 +213,7 @@ func RegistrationCheckers() map[string]diagnostics.RegistrationFunc {
 		"V196": registrationV196,
 		"V197": registrationV197,
 		"V198": registrationV198,
+		"V201": registrationV201,
+		"V204": registrationV204,
 	}
 }

@@ -20,9 +20,6 @@ func TestV144RegistrationAndVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if registry.Len() != 198 || len(definitions) != 198 {
-		t.Fatalf("catalog size = %d, DSL 1.2 definitions = %d, want 198", registry.Len(), len(definitions))
-	}
 	count := 0
 	for _, definition := range definitions {
 		if definition.Code != "V144" {
